@@ -122,6 +122,25 @@ fn exports_run_in_the_background_and_the_preference_turns_both_off() {
     assert!(app.background.jobs.is_empty());
 }
 
+/// iPadOS takes a saved file to its destination through a document picker the writer waits for:
+/// the host asks for the worker whatever the preferences say, so the UI thread never waits.
+#[test]
+fn a_host_that_requires_the_worker_saves_and_exports_in_the_background_with_the_preferences_off() {
+    let gate = Gate::default();
+    let (mut app, files) = app(gate.clone());
+    app.services.save_requires_worker = true;
+    app.run("file.new", json!({"width": 100, "height": 100})).unwrap();
+    app.session.execute("prefs.set", &json!({"values": {"backgroundSave": false, "backgroundExport": false}})).unwrap();
+    let saved = app.run("file.save", json!({"path": "/docs/a.vectorcraft"})).unwrap();
+    assert_eq!(saved["background"].as_bool(), Some(true));
+    let exported = io::export(&mut app, Some("svg"), Some("/out/a.svg".into()), &json!({})).unwrap();
+    assert_eq!(exported["background"].as_bool(), Some(true));
+    assert!(written(&files).is_empty(), "the writer is still waiting");
+    gate.open();
+    background::wait_all(&mut app);
+    assert_eq!(written(&files), ["/docs/a.vectorcraft", "/out/a.svg"]);
+}
+
 /// A save that returns before the file is written still says what it writes and which options it
 /// does not use, as `app.save` (MCP's `save_file`) replies with it: what the format loses first, as
 /// the reply of a save written at once.

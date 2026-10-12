@@ -639,8 +639,9 @@ pub fn paint(painter: &Painter, c: Cursor, p: Pos2, scale: f32) -> bool {
 
 /// Does the window show the glyphs as OS cursors ([`Images`])? Not on macOS, which sizes a cursor
 /// bitmap in points (a Retina one would show twice as big, or blurred), nor on the web (eframe has no
-/// bitmap cursors there): those paint them into the window ([`paint`]).
-pub const OS_CURSORS: bool = !cfg!(any(target_os = "macos", target_arch = "wasm32"));
+/// bitmap cursors there), nor on iPadOS (winit ignores cursor setters there, so the Pencil's hover
+/// would show no cursor): those paint them into the window ([`paint`]).
+pub const OS_CURSORS: bool = !cfg!(any(target_os = "macos", target_os = "ios", target_arch = "wasm32"));
 
 /// Does this window show the glyphs as OS cursors, on a build that can ([`OS_CURSORS`])? Not on
 /// Wayland, where the compositor decides how big a cursor bitmap shows: Hyprland shows each pixel

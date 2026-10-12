@@ -76,7 +76,7 @@ pub fn export(app: &mut VectorcraftApp, format: Option<&str>, path: Option<Strin
             Ok(out)
         })
     };
-    let enabled = app.session.prefs.background_export;
+    let enabled = app.session.prefs.background_export || app.services.save_requires_worker;
     let failed = target.clone();
     let mut r = background::run_with_progress(app, enabled, label, None, Some(progress), work, move |app, r| {
         // A file written before the Cancel arrived is reported as written.
@@ -229,7 +229,10 @@ pub(crate) fn export_files(app: &mut VectorcraftApp, id: &str, params: Value) ->
     let open_location = params.get("openLocation").and_then(Value::as_bool).unwrap_or(false);
     let folder = params.get("folder").and_then(Value::as_str).unwrap_or_default().to_string();
     // Without a folder the files come back in the reply, which the caller waits for.
-    let in_background = app.session.prefs.background_export && app.services.write_shared.is_some() && !is_web(app) && !folder.is_empty();
+    let in_background = (app.session.prefs.background_export || app.services.save_requires_worker)
+        && app.services.write_shared.is_some()
+        && !is_web(app)
+        && !folder.is_empty();
     if !in_background {
         // Made at once, after the exports and saves started before it.
         background::wait_all(app);

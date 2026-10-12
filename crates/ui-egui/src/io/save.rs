@@ -406,7 +406,7 @@ fn write_plan(app: &mut VectorcraftApp, plan: SavePlan) -> Result<Value, String>
         None => "Saving".into(),
     };
     // Without a path the bytes come back to the caller: nothing to do in the background.
-    let enabled = app.session.prefs.background_save && target.is_some();
+    let enabled = (app.session.prefs.background_save || app.services.save_requires_worker) && target.is_some();
     // The work writes the file; the copy makes it the document's own afterwards.
     let done = job.clone();
     // A native file streams into the file as it is encoded (desktop; not to a download).
