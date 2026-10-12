@@ -32,6 +32,13 @@ reads the pen's eraser end on Windows, on macOS and on Linux under X11 and XWayl
 | Display colour profile (proof and display through the monitor's ICC) | yes | no | no | no | — | missing: 3–5 h |
 | 3D GPU rendering (Materials, ray tracing) | yes | — | — | — | — | blocked on 3D (gap G3) |
 
+## iPadOS (fork)
+
+Only what has been demonstrated, on the iPad Air 11-inch (M3) Simulator with iPadOS 26.2 (2026-10-13):
+the Debug app builds for Apple Silicon, installs, launches, renders the editor in landscape, and lays out
+inside the safe area (UIKit bottom inset 20 pt, top inset 32 pt while the status bar shows, then 0). Not
+verified: a physical iPad, Apple Pencil, touch gestures, document pickers, multitasking, Release builds.
+
 ## Revision history
 
 | Date | Change | Summary |
@@ -42,5 +49,6 @@ reads the pen's eraser end on Windows, on macOS and on Linux under X11 and XWayl
 | 2026-10-14 | minor | Tool cursors are painted into the window on Wayland (#1652; not run on Linux, #1645 stays open until confirmed); On Windows the custom title bar's window stays truly borderless, so the pointer lines up with what is drawn on systems where the hidden caption offset it (#1791, #1758; awaiting the reporter's confirmation); neither is confirmed on the hardware that reported it, so nothing is marked done |
 | 2026-10-13 | minor | Web: the shell reads pen and finger Pointer Events itself (pen pressure with coalesced events, Apple Pencil hover, palm rejection: after a pen contact fingers only navigate until reload; long press opens the context menu); score unchanged (estimated) |
 | 2026-10-13 | minor | A window whose surface is larger than 8192 px (stretched over several monitors, or grown by a drag between monitors of different scale) is configured up to the graphics adapter's limit instead of closing the app (#1495, part of #1459); the window growing during that drag on Windows is still open; not reproduced on a mixed-scale setup |
+| 2026-10-13 | minor | iPadOS fork section: simulator launch and safe-area layout only; nothing else claimed |
 | 2026-10-11 | minor | Preferences › Performance › Linux Display Server › X11 (XWayland) opens the window through XWayland on a Wayland session, where pens and dropped files reach the app (#1151); score unchanged (estimated) |
 | 2026-10-10 | major | First checklist from the canvas, touch and graphics code and the open hardware issues |

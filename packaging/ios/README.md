@@ -46,7 +46,7 @@ are implemented, with provider selection and write-back acceptance still pending
 The entitlement file is deliberately empty: iOS already sandboxes applications;
 macOS app-sandbox and user-selected-file entitlements do not belong here.
 
-The asset catalog's `AppIcon` is the VectorCraft kitsune from `assets/app-icon/`
-(attributed in `ATTRIBUTION.md`), flattened onto the full-bleed `#2f7bf5` field with no
-alpha channel, since iOS applies its own corner mask and rejects transparency. It is one
+The asset catalog's `AppIcon` is VectorCraft's engraved dragon from `assets/app-icon/` (attributed in
+`ASSETS.md`), rendered without its rounded-corner clip and flattened onto the full-bleed `#e8573f` field
+with no alpha channel, since iOS applies its own corner mask and rejects transparency. It is one
 1024 pt image that Xcode scales to every iPad size.
