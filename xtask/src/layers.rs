@@ -55,6 +55,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("vectorcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    ("ios", Class::Exempt),
     ("xtask", Class::Exempt),
     // Crates added later (append-only).
     ("cad", Class::Layer(3)),
@@ -263,6 +264,12 @@ mod tests {
         Crate { name: name.into(), deps: deps.iter().map(|(n, k, w)| Dep { name: (*n).into(), kind: *k, workspace: *w }).collect() }
     }
     use DepKind::*;
+
+    #[test]
+    fn ios_runner_is_registered_as_an_app() {
+        assert_eq!(classify("vectorcraft-ios"), Some(Class::Exempt));
+        assert!(check(&[c("vectorcraft-ios", &[("vectorcraft-ui-egui", Normal, true)])]).is_empty());
+    }
 
     #[test]
     fn clean_downward_graph_passes() {

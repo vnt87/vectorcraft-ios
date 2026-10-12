@@ -9,6 +9,7 @@ mod brands;
 mod bundle;
 mod cursors;
 mod ico;
+mod ios;
 mod layers;
 mod pdf_deps;
 mod pngsuite;
@@ -38,6 +39,9 @@ commands:
                   show where test corpora live; --download fetches PngSuite into corpus/pngsuite,
                   --affinity the pinned public Affinity documents into corpus/affinity
   bundle          build dist/VectorCraft.app (macOS) with assets/app-icon/vectorcraft.icns
+  ios (--sim | --device) [--release] [--dry-run] [--sim-name N] [--device-id ID] [--team ID] [--bundle-id ID]
+                  build the VectorCraft iPad bundle with xcodebuild and run it on the Simulator or a
+                  device (macOS + Xcode; --dry-run prints the plan anywhere; see `ios --help`)
   ico <out.ico> <png>...
                   pack PNGs into a Windows .ico (used by packaging/icons.sh)
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
@@ -62,6 +66,7 @@ fn main() -> ExitCode {
         Some("corpus") => cmd_corpus(rest.contains(&"--download")),
         Some("bundle") => bundle::run(&root()),
         Some("ico") => ico::run(&rest),
+        Some("ios") => ios::run(&root(), &rest),
         Some("version") => version::run(&root(), &rest),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("web-fonts") => web_fonts::run(&root()),
