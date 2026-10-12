@@ -1,6 +1,6 @@
 # Hardware parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Linux Display Server preference opens the window through XWayland, #1151) · **Target:** Adobe Illustrator 2026 (30.x)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (Linux Display Server preference opens the window through XWayland, #1151) · **Target:** Adobe Illustrator 2026 (30.x)
 
 What hardware Illustrator uses, per platform, against VectorCraft. Illustrator's side is from its public
 documentation (GPU Performance, touch workspace, pen pressure pages); ours from the code
@@ -29,9 +29,17 @@ on huge documents. Pen input is pressure-only and Windows-first.
 | Display colour profile (proof and display through the monitor's ICC) | yes | no | no | no | — | missing: 3–5 h |
 | 3D GPU rendering (Materials, ray tracing) | yes | — | — | — | — | blocked on 3D (gap G3) |
 
+## iPadOS (fork)
+
+Only what has been demonstrated, on the iPad Air 11-inch (M3) Simulator with iPadOS 26.2 (2026-10-13):
+the Debug app builds for Apple Silicon, installs, launches, renders the editor in landscape, and lays out
+inside the safe area (UIKit bottom inset 20 pt, top inset 32 pt while the status bar shows, then 0). Not
+verified: a physical iPad, Apple Pencil, touch gestures, document pickers, multitasking, Release builds.
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | iPadOS fork section: simulator launch and safe-area layout only; nothing else claimed |
 | 2026-10-11 | minor | Preferences › Performance › Linux Display Server › X11 (XWayland) opens the window through XWayland on a Wayland session, where pens and dropped files reach the app (#1151); score unchanged (estimated) |
 | 2026-10-10 | major | First checklist from the canvas, touch and graphics code and the open hardware issues |
