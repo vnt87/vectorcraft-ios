@@ -259,6 +259,11 @@ pub struct Services {
     /// [`Self::start_pick`]'s dialogs are sheets on the window (macOS): while one is open the app
     /// neither quits nor closes documents, as under the modal dialog before.
     pub dialogs_are_sheets: bool,
+    /// Saves and exports always run on the background worker ([`background`]), whatever the
+    /// Background Save and Export preferences say: the host's writer may wait for the user (iPadOS:
+    /// the document picker that takes the file to its destination), which must never hold the UI
+    /// thread. Needs [`Self::write_shared`].
+    pub save_requires_worker: bool,
 }
 
 /// Cached canvas raster.
