@@ -665,6 +665,7 @@
 	Hide Print Tiling	プリント分割を隠す
 	Unlock Grid	グリッドをロック解除
 	Edit Envelope	エンベロープを編集
+	Auto Color	自動カラー
 	Automatic	自動
 	Isolate Selected Group	選択したグループを分離
 	Exit Isolation Mode	分離モードを終了
@@ -935,6 +936,59 @@
 	Character Set:	文字セット:
 	Character Style Options	文字スタイルオプション
 	Check Links	リンクを確認
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	スクリプトをチェック
+	Check Script…	スクリプトをチェック…
+	Copy Report	レポートをコピー
+	VectorCraft read this script without running it.	VectorCraft はこのスクリプトを実行せずに読み取りました。
+	Needs nothing beyond plain JavaScript	通常の JavaScript 以外は不要
+	Needs the script language's own objects or directives	スクリプト言語固有のオブジェクトまたはディレクティブが必要
+	Needs the document model	ドキュメントモデルが必要
+	Needs files	ファイルが必要
+	Needs menu commands	メニューコマンドが必要
+	Needs dialogs	ダイアログが必要
+	Needs features only the reference app has	参照アプリだけにある機能が必要
+	Outside the document	ドキュメントの外
+	Writes, moves or deletes files	ファイルを書き込み、移動、削除
+	Opens files in other apps	ほかのアプリでファイルを開く
+	Opens network connections	ネットワーク接続を開く
+	Loads native code	ネイティブコードを読み込む
+	Sends messages to other apps	ほかのアプリにメッセージを送る
+	Reads or sets environment variables	環境変数を読み取りまたは設定
+	Runs code the checker can't read	チェックで読み取れないコードを実行
+	Changes the reference app's preferences	参照アプリの環境設定を変更
+	Menu commands	メニューコマンド
+	Names the script builds as it runs: {count}	スクリプトが実行時に組み立てる名前：{count}
+	Document model	ドキュメントモデル
+	Object types: {names}	オブジェクトの種類：{names}
+	Directives	ディレクティブ
+	Includes	インクルード
+	Checked	チェック済み
+	Not followed: outside the script's folder	読み込み対象外：スクリプトのフォルダーの外
+	Includes itself	自身をインクルードしています
+	Not read	読み込んでいません
+	Not read: a limit was reached	読み込んでいません：上限に達しました
+	Compiled or not text	コンパイル済みかテキストではありません
+	Problems	問題
+	String not closed	文字列が閉じていません
+	Comment not closed	コメントが閉じていません
+	Regular expression not closed	正規表現が閉じていません
+	Template literal not closed	テンプレートリテラルが閉じていません
+	XML literal not closed	XML リテラルが閉じていません
+	Bracket never closed	括弧が閉じていません
+	Closing bracket with no opening one	対応する開き括弧のない閉じ括弧
+	Syntax newer than ES3	ES3 より新しい構文
+	Unknown directive	不明なディレクティブ
+	Not valid UTF-8: unreadable bytes were replaced	有効な UTF-8 ではありません：読み取れないバイトを置き換えました
+	Mixed line endings	改行コードが混在しています
+	Nesting too deep to follow	入れ子が深すぎてたどれません
+	line {line}	{line} 行目
+	lines {lines}	{lines} 行目
+	{file}, line {line}	{file}、{line} 行目
+	Compiled script: ask its author for the .jsx file	コンパイル済みスクリプト：作成者に .jsx ファイルを依頼してください
+	Too large to check	大きすぎてチェックできません
+	Not a script for the reference app	参照アプリ用のスクリプトではありません
+	Some lists were cut short at their limit.	一部の一覧は上限で打ち切られました。
 	Choose a folder	フォルダーを選択
 	Choose…	選択…
 	Circle	円
@@ -1420,6 +1474,8 @@
 	Graphic Style Library	グラフィックスタイルライブラリ
 	Graphic Style Options	グラフィックスタイルオプション
 	Graphic Style Options…	グラフィックスタイルオプション…
+	Symbol Options	シンボルオプション
+	Symbol Options…	シンボルオプション…
 	Graphic Styles Options	グラフィックスタイルオプション
 	Graphics Processor	グラフィックプロセッサー
 	Graphics: {adapter}	グラフィックス: {adapter}
@@ -1480,6 +1536,8 @@
 	Identify Objects By	オブジェクトの識別方法
 	Ignore	無視
 	Ignore Artboards (all the art as one page)	アートボードを無視 (すべてのアートを 1 ページとして扱う)
+	Auto Grouping	自動グループ化
+	Ignore Color	カラーを無視
 	Ignore White	白を無視
 	Palette:	パレット:
 	Limited	限定
@@ -2519,6 +2577,8 @@
 	Spiral Tool	スパイラルツール
 	Split Freeform Line	フリーフォームラインを分割
 	Split Into Grid	グリッドに分割
+	Total:	合計:
+	Add Guides	ガイドを追加
 	Split Path	パスを分割
 	Spot Color	特色
 	Spot Colors	特色
@@ -3219,6 +3279,7 @@
 	Yellow	イエロー
 	[Normal Character Style]	[標準文字スタイル]
 	[Normal Paragraph Style]	[標準段落スタイル]
+imageTrace	Outline	アウトライン
 @plural	Color Table ({n} color)|Color Table ({n} colors)	カラーテーブル ({n} 色)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	{n} 個のグラフィックスタイルを削除しますか？
 @plural	{n} Layer|{n} Layers	{n} レイヤー
@@ -3546,6 +3607,7 @@ theme	Appearance	外観
 @msg	the layer to flatten into is hidden	統合先のレイヤーが非表示になっています
 @msg	there are no objects to release	レイヤーに分配するオブジェクトがありません
 @msg	no library `{id}`	ライブラリ `{id}` が見つかりません
+@msg	{path}: not a file	{path}: ファイルではありません
 @msg	{path}: {e}	{path}: {e}
 @msg	can't write .{ext} images	.{ext} 画像は書き出せません
 @msg	Replace Spine: select a blend and a path	ブレンド軸を置き換え: ブレンドとパスを選択してください
@@ -3586,6 +3648,7 @@ theme	Appearance	外観
 @msg	Divide Objects Below: select a path	背面のオブジェクトで型抜き: パスを選択してください
 @msg	Divide Objects Below: select exactly one path	背面のオブジェクトで型抜き: パスを 1 つだけ選択してください
 @msg	Offset Path: select paths	パスのオフセット: パスを選択してください
+@msg	Offset Path: the offset leaves nothing of the selected paths (an inset larger than the shapes)	パスのオフセット: オフセットすると選択したパスが何も残りません (内側へのオフセットがシェイプより大きい)
 @msg	Outline Stroke: no stroked paths selected	パスのアウトライン: 線のあるパスが選択されていません
 @msg	Split Into Grid: select paths large enough for the grid	グリッドに分割: グリッドが収まる大きさのパスを選択してください
 @msg	empty cutter	型抜きに使うパスが空です
@@ -3904,6 +3967,7 @@ theme	Appearance	外観
 @msg	{_1} font families available	{_1} 個のフォントファミリーを使用できます
 @msg	{_1} has no {_2} style	{_1} には {_2} スタイルがありません
 @msg	Copied the CSS of {rules} object(s)	{rules} 個のオブジェクトの CSS をコピーしました
+@msg	Copied the script report	スクリプトのレポートをコピーしました
 @msg	Exported {path}	{path} を書き出しました
 @msg	no CSS to copy: select objects with CSS of their own	コピーする CSS がありません: 独自の CSS を持つオブジェクトを選択してください
 @msg	unknown highlight `{h}`	`{h}` は不明なハイライトの指定です
@@ -4196,3 +4260,48 @@ lighting	Light	ライト
 	Use Outside Rectangle As Frame	外側の長方形をフレームとして使用
 	Create Compound Path From Ellipses	楕円形から複合パスを作成
 	Fill Grid	グリッドを塗りつぶす
+	Select two or more objects, or a group	2 つ以上のオブジェクト、またはグループを選択してください
+# 3D and Materials › Extrude & Bevel, Inflate and Rotate: options, Position presets and bevel shapes.
+	Back	背面
+	Both sides	両面
+	Classic	クラシック
+	Cove	凹面
+	Depth	奥行き
+	Front	正面
+	Isometric Bottom	等角図（底面）
+	Isometric Left	等角図（左）
+	Isometric Right	等角図（右）
+	Isometric Top	等角図（上面）
+	Off-Axis Back	斜め（背面）
+	Off-Axis Bottom	斜め（底面）
+	Off-Axis Front	斜め（正面）
+	Off-Axis Left	斜め（左）
+	Off-Axis Right	斜め（右）
+	Off-Axis Top	斜め（上面）
+	Ogee	S字
+	Reset all 3D settings to their defaults.	すべての 3D 設定を初期値に戻します。
+	Step	段
+	Taper	テーパー
+	Twist	ねじれ
+	Volume	ボリューム
+3d	Cap	キャップ
+3d	Solid	ソリッド
+3d	Hollow	中空
+3d	Bevel	ベベル
+3d	Rounded	丸み
+3d	Space	間隔
+	Bevel Shape	ベベルシェイプ
+	Bevel Inside	ベベルを内側に
+	Bevel both sides	両面にベベル
+	Presets	プリセット
+@msg	An object takes one 3D effect. Edit the existing effect's options, or remove it first.	1 つのオブジェクトに適用できる 3D 効果は 1 つです。既存の効果のオプションを編集するか、先に削除してください。
+@msg	{label} currently requires a path or compound path. Convert type, images and groups to paths first.	{label} には現在、パスまたは複合パスが必要です。テキスト、画像、グループは先にパスに変換してください。
+@msg	{label} requires a shape with at least two anchors	{label} には 2 つ以上のアンカーポイントを持つシェイプが必要です
+@msg	The shape is too complex for a 3D effect	シェイプが複雑すぎるため 3D 効果を適用できません
+@msg	The 3D surface is too complex; simplify the shape	3D サーフェスが複雑すぎます。シェイプを単純化してください
+	Transform Objects	オブジェクトの変形
+@msg	unknown parameter `{key}`; did you mean `{near}`?	`{key}` は不明なパラメーターです。`{near}` のことですか?
+@msg	unknown parameter `{key}`; the command takes no parameters	`{key}` は不明なパラメーターです。このコマンドにパラメーターはありません
+@msg	unknown parameter `{key}`; the command takes: {keys}	`{key}` は不明なパラメーターです。このコマンドで使えるパラメーター: {keys}
+	Load EPS into Clipboard	EPS をクリップボードに読み込む
+@msg	an image of {w} × {h} pixels is too large to draw	{w} × {h} ピクセルの画像は大きすぎて描画できません

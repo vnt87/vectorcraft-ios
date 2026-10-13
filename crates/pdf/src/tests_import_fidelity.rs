@@ -78,6 +78,58 @@ fn the_mask(d: &Document) -> (Node, OpacityMask) {
     (n, m)
 }
 
+/// The two pixels of the image a soft mask of kind `s` draws: black, opaque on the left and clear
+/// on the right (its own `/SMask`).
+fn mask_image_pixels(s: &str) -> [[u8; 4]; 2] {
+    let g = first_extra(1);
+    let group = stream(
+        &format!(
+            "/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /XObject << /Im0 {} 0 R >> >>",
+            g + 1
+        ),
+        "q 100 0 0 100 0 0 cm /Im0 Do Q",
+    );
+    let image = stream(
+        &format!(
+            "/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /SMask {} 0 R",
+            g + 2
+        ),
+        "000000000000>",
+    );
+    let smask =
+        stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode", "FF00>");
+    let bytes = one_page(
+        "/GS0 gs 1 0 0 rg 0 0 100 100 re f",
+        &format!("/ExtGState << /GS0 << /SMask << /Type /Mask /S /{s} /G {g} 0 R >> >> >>"),
+        &[&group, &image, &smask],
+    );
+    let d = open(&bytes);
+    let (_, m) = the_mask(&d);
+    let mut keys = vec![];
+    m.art.walk(&mut |n| {
+        if let NodeKind::Image(im) = &n.kind {
+            keys.push(im.key.clone());
+        }
+    });
+    let [key] = keys.as_slice() else { panic!("one image in the mask art: {keys:?}") };
+    let px = image::load_from_memory(&d.images[key].bytes).unwrap().to_rgba8();
+    [px.get_pixel(0, 0).0, px.get_pixel(1, 0).0]
+}
+
+/// An alpha soft mask whose art is an image with its own alpha (some PDF writers rasterize masks
+/// so): the image is read white with that alpha, so the mask's luminance is the alpha, not the
+/// image's colour (ISO 32000-1 11.5.2: an alpha mask takes the group's alpha, not its colour).
+#[test]
+fn an_alpha_soft_mask_of_an_image_uses_the_images_alpha() {
+    assert_eq!(mask_image_pixels("Alpha"), [[255, 255, 255, 255], [255, 255, 255, 0]]);
+}
+
+/// A luminosity soft mask takes the group's colour (ISO 32000-1 11.5.3): its image stays black.
+#[test]
+fn a_luminosity_soft_mask_of_an_image_keeps_the_images_colour() {
+    assert_eq!(mask_image_pixels("Luminosity"), [[0, 0, 0, 255], [0, 0, 0, 0]]);
+}
+
 #[test]
 fn a_luminosity_soft_mask_becomes_an_opacity_mask() {
     let d = open(&masked("/S /Luminosity", "1 1 1 rg 0 0 50 100 re f"));
@@ -543,4 +595,17 @@ fn glyphs_closed_up_by_half_an_em_stay_one_line() {
     let t = texts(&open(&one_page("BT /F1 20 Tf 10 40 Td [(T) 400 (i) 450 (g) 0 (h) 0 (t)] TJ ET", HELVETICA, &[])));
     assert_eq!(t.len(), 1, "one line: {:?}", t.iter().map(|t| t.plain_text()).collect::<Vec<_>>());
     assert_eq!(t[0].plain_text(), "Tight");
+}
+
+/// #1542: a clip only counts as covering the page when it does; a diamond whose bounding box is
+/// the page still clips, a page rectangle or a turned square around it doesn't make a group.
+#[test]
+fn clips_with_the_page_as_bounding_box_still_clip() {
+    let clipped = |clip: &str| {
+        let d = open(&one_page(&format!("q {clip} W n 1 0.5 0 rg 0 0 100 100 re f Q"), "", &[]));
+        all(&d).iter().any(|n| matches!(n.kind, NodeKind::Group { clip: true, .. }))
+    };
+    assert!(clipped("50 0 m 100 50 l 50 100 l 0 50 l h"), "diamond");
+    assert!(!clipped("0 0 100 100 re"), "the page");
+    assert!(!clipped("50 -60 m 160 50 l 50 160 l -60 50 l h"), "a turned square around the page");
 }

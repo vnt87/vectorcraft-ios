@@ -27,6 +27,7 @@ use vectorcraft_tools::{PaintDefaults, Tool};
 pub use cmd::EyedropperOptions;
 pub use cmd::clipboard::Clipboard;
 pub use cmd::distortcmds::perspective_click;
+pub use cmd::params::{check_keys, check_params};
 pub use cmd::rasterfx::{export_pdf, flatten_raster_effects};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
 pub use journal::Journal;
@@ -217,6 +218,25 @@ pub struct Interaction {
     /// The perspective transform the previews make (`perspective.transform` params): Transform
     /// Again repeats it once the drag is committed.
     pub perspective_again: Option<Value>,
+    /// A transform with `copy` keeps the copies it made of the snapshot here ([`PreviewCopies`]).
+    pub(crate) copies: Option<Arc<PreviewCopies>>,
+}
+
+/// This holds the copies that a transform with `copy` made of an interaction's snapshot
+/// ([`cmd::object::apply_transform`]). A later transform with `copy` of the same objects, while
+/// the document is still that snapshot, starts from `doc` and transforms only the copies.
+#[derive(Debug)]
+pub(crate) struct PreviewCopies {
+    /// The copies were made from this snapshot.
+    pub(crate) from: Arc<Document>,
+    /// The transform copied these objects.
+    pub(crate) roots: Vec<NodeId>,
+    /// This is `from` with the copies added, untransformed.
+    pub(crate) doc: Arc<Document>,
+    /// This is the selection after copying, with the copies selected.
+    pub(crate) selection: Selection,
+    /// These are the copies' ids, in the order of `roots`.
+    pub(crate) ids: Vec<NodeId>,
 }
 
 /// An open undo group ([`Session::begin_undo_group`]): the edits made in it are one undo step.
@@ -556,6 +576,11 @@ fn strip_replay_only(id: &str, p: &mut Value) {
             }
         }
     }
+}
+
+/// Is `id` a path made into a guide (View → Guides → Make Guides)?
+pub(crate) fn is_guide_path(d: &Document, id: NodeId) -> bool {
+    d.node(id).is_some_and(|n| matches!(n.kind, NodeKind::Path { guide: true, .. }))
 }
 
 /// Cheap sanity check after an edit: artboards and the objects just touched (the selection) must
@@ -1275,12 +1300,35 @@ impl Session {
         true
     }
 
+    /// `spec`'s `enabled` with `ids` selected instead of the selection, which is then put back.
+    fn enabled_with_selection(&mut self, spec: &CommandSpec, ids: Vec<NodeId>) -> std::result::Result<(), String> {
+        let Some(d) = self.active_mut() else { return (spec.enabled)(self) };
+        let old = std::mem::replace(&mut d.selection, Selection { objects: ids, ..Selection::default() });
+        let r = (spec.enabled)(self);
+        if let Some(d) = self.active_mut() {
+            d.selection = old;
+        }
+        r
+    }
+
     /// Execute a command by id. This is THE entry point for every frontend.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // The crate's own tests are the audit of the params descriptions (#1442): a key a test
+        // passes that its command's description doesn't name fails the test.
+        #[cfg(test)]
+        self.check_params(id, params)?;
         // Clear's menu needs a selection; an agent supplying explicit targets only needs a
         // document. The command validates those targets before making any edit.
-        let enabled = if id == "edit.clear" && params.get("ids").is_some() { cmd::has_doc(self) } else { (spec.enabled)(self) };
+        let enabled = if id == "edit.clear" && params.get("ids").is_some() {
+            cmd::has_doc(self)
+        } else if let Some(ids) = given_ids(spec.params, params) {
+            // Objects given as `ids` stand in for the selection: the command is enabled as it is
+            // with them selected (#1575).
+            self.enabled_with_selection(spec, ids)
+        } else {
+            (spec.enabled)(self)
+        };
         if let Err(why) = enabled {
             return Err(EngineError::Disabled(id.to_string(), why));
         }
@@ -1458,10 +1506,18 @@ impl Session {
     /// Change only the selection (not an undo step).
     pub fn select(&mut self, f: impl FnOnce(&Document, &mut Selection)) -> Result<()> {
         self.active_appearance_item = None;
+        let guides_locked = self.menu.guides_locked;
         let st = self.doc_mut()?;
         let before = st.selection.objects.clone();
         f(&st.doc, &mut st.selection);
         st.selection.prune(&st.doc);
+        // Lock Guides locks the paths made into guides too (#1534), whatever selects them.
+        if guides_locked {
+            let locked: Vec<NodeId> = st.selection.objects.iter().copied().filter(|id| is_guide_path(&st.doc, *id)).collect();
+            for id in locked {
+                st.selection.remove(id);
+            }
+        }
         // Selecting art makes its layer (or sublayer) the current one, as in the Layers panel of
         // the reference app: new art then goes beside it.
         if st.selection.objects != before
@@ -1496,6 +1552,7 @@ impl Session {
             variables_highlight: st.variables_highlight.clone(),
             isolation: st.isolation,
             perspective_again: None,
+            copies: None,
         });
         Ok(())
     }
@@ -1732,6 +1789,8 @@ mod tests_halftone;
 #[cfg(test)]
 mod tests_history_mem;
 #[cfg(test)]
+mod tests_ids_without_selection;
+#[cfg(test)]
 mod tests_inline;
 #[cfg(test)]
 mod tests_journal;
@@ -1739,6 +1798,8 @@ mod tests_journal;
 mod tests_knockout;
 #[cfg(test)]
 mod tests_labspots;
+#[cfg(test)]
+mod tests_large_edits;
 #[cfg(test)]
 mod tests_layerclip;
 #[cfg(test)]
@@ -1787,6 +1848,8 @@ mod tests_paintproxy;
 mod tests_panelcmds;
 #[cfg(test)]
 mod tests_paragraphs;
+#[cfg(test)]
+mod tests_params;
 #[cfg(test)]
 mod tests_pathops;
 #[cfg(test)]
@@ -1854,6 +1917,8 @@ mod tests_saveoptions;
 #[cfg(test)]
 mod tests_scalestrokes;
 #[cfg(test)]
+mod tests_scripts;
+#[cfg(test)]
 mod tests_shaper;
 #[cfg(test)]
 mod tests_slices;
@@ -1913,3 +1978,10 @@ mod tests_widthprofiles;
 mod tests_widthtool;
 #[cfg(test)]
 mod tests_xform;
+
+/// The non-empty `ids` given to a command whose params description names `ids` as a key (the
+/// key callers outside the app may pass it, [`cmd::params::takes_key`]).
+fn given_ids(description: &'static str, params: &Value) -> Option<Vec<NodeId>> {
+    let ids = cmd::ids_param(params, "ids").filter(|ids| !ids.is_empty())?;
+    cmd::params::takes_key(description, "ids").then_some(ids)
+}

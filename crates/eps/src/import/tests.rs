@@ -248,6 +248,12 @@ fn clips_become_clipping_groups() {
     // eoclip of a path.
     let o = objects(&read("10 10 moveto 30 10 lineto 30 30 lineto closepath eoclip newpath 0 0 50 50 rectfill").document);
     assert!(matches!(o[0].kind, NodeKind::Group { clip: true, .. }));
+    // #1542: a diamond touching the page edges has the page as its bounding box but still clips.
+    let o = objects(&read("50 0 moveto 100 50 lineto 50 100 lineto 0 50 lineto closepath clip newpath 0 0 100 100 rectfill").document);
+    assert!(matches!(o[0].kind, NodeKind::Group { clip: true, .. }), "{:?}", o[0].kind);
+    // A turned square around the whole page clips nothing.
+    let o = objects(&read("50 -60 moveto 160 50 lineto 50 160 lineto -60 50 lineto closepath clip newpath 0 0 100 100 rectfill").document);
+    assert!(matches!(o[0].kind, NodeKind::Path { .. }), "{:?}", o[0].kind);
 }
 
 #[test]
@@ -465,6 +471,22 @@ fn the_bounding_box_comes_from_the_header_or_the_trailer() {
     assert_eq!(r.document.artboards[0].rect, Rect::new(0.0, 0.0, 612.0, 792.0));
     assert_eq!(objects(&r.document).len(), 1);
     assert!(r.warnings.iter().any(|w| w.contains("first of the file's 2 pages")), "{:?}", r.warnings);
+}
+
+/// #1552: a Type 42 font's glyph space is one unit an em, so its identity FontMatrix scaled to 12
+/// sets 12 pt type (a Type 1's 0.001 matrix needs the 1000-unit space).
+#[test]
+fn type_42_fonts_set_type_at_their_size() {
+    for (kind, matrix) in [(42, "[1 0 0 1 0 0]"), (1, "[0.001 0 0 0.001 0 0]")] {
+        let body = format!(
+            "/T 10 dict begin /FontName /T def /FontType {kind} def /FontMatrix {matrix} def /Encoding StandardEncoding def currentdict end /T exch definefont pop \
+             /T findfont 12 scalefont setfont 10 20 moveto (Hi) show"
+        );
+        let r = read(&body);
+        let NodeKind::Text(t) = &objects(&r.document)[0].kind else { panic!("{:?}", r.warnings) };
+        let size = t.runs[0].style.size * t.xf.determinant().abs().sqrt();
+        assert!((size - 12.0).abs() < 1e-6, "FontType {kind}: {size} pt");
+    }
 }
 
 #[test]

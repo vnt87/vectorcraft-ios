@@ -23,7 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Apply Effect",
             [],
             None,
-            "{effect: id (see effect.list, e.g. \"stylize.dropShadow\", \"distort.roughen\", \"warp.arc\", or \"plugin.<id>\" for an installed effect plug-in), params?: {…} (missing keys take the dialog defaults), item?: appearance item index|null (apply to that fill/stroke only; omitted: the Appearance panel's active item, else the whole object), ids?: [..] (layers too), target?: \"object\"|\"contents\" (contents: the objects inside groups and layers)} append a live effect to each selected object's appearance (a group's or layer's apply to its members as one piece: one combined shadow; a Pathfinder effect, which combines a group's contents, groups several loose selected objects first, in the same undo step) → {ids, index, item, grouped?}",
+            "{effect: id (see effect.list, e.g. \"stylize.dropShadow\", \"distort.roughen\", \"warp.arc\", or \"plugin.<id>\" for an installed effect plug-in), params?: {…} (missing keys take the dialog defaults), item?: appearance item index|null (apply to that fill/stroke only; omitted: the Appearance panel's active item, else the whole object), ids?|id?: [..] (layers too), target?: \"object\"|\"contents\" (contents: the objects inside groups and layers)} append a live effect to each selected object's appearance (a group's or layer's apply to its members as one piece: one combined shadow; a Pathfinder effect, which combines a group's contents, groups several loose selected objects first, in the same undo step) → {ids, index, item, grouped?}",
             has_doc,
             apply
         ),
@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Effects",
             [],
             None,
-            "{} → {catalog: [{id, label, menu, params, defaults, raster, lengths: {always, absolute (while relative is false)} (distance params Scale Strokes & Effects scales)}] (installed effect plug-ins last: id plugin.<plug-in id>, menu Effect › Plug-ins), applied: [{id, effects, items: [{index, kind: fill|stroke, effects}]}], activeItem} for the selection",
+            "{ids?|id?: object ids (default: the selection), target?: \"object\"|\"contents\"} → {catalog: [{id, label, menu, params, defaults, raster, lengths: {always, absolute (while relative is false)} (distance params Scale Strokes & Effects scales)}] (installed effect plug-ins last: id plugin.<plug-in id>, menu Effect › Plug-ins), applied: [{id, effects, items: [{index, kind: fill|stroke, effects}]}], activeItem} for the selection",
             always,
             list
         ),
@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Remove Effect",
             [],
             None,
-            "{index: int (position in the effect list), item?: appearance item index|null (that fill/stroke's effects; omitted: the active item, else the object's), ids?: [..]} → {ids}",
+            "{index: int (position in the effect list), item?: appearance item index|null (that fill/stroke's effects; omitted: the active item, else the object's), ids?|id?: [..], target?: \"object\"|\"contents\"} → {ids}",
             has_doc,
             remove
         ),
@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Effect Options",
             [],
             None,
-            "{index: int, params?: {…} (merged into the current parameters), visible?: bool, item?: appearance item index|null (as effect.remove), ids?: [..]} → {ids}",
+            "{index: int, params?: {…} (merged into the current parameters), visible?: bool, item?: appearance item index|null (as effect.remove), ids?|id?: [..], target?: \"object\"|\"contents\"} → {ids}",
             has_doc,
             set_params
         ),
@@ -59,7 +59,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Expand Appearance",
             ["Object"],
             None,
-            "{ids?: [..], target?} turn each object's appearance into objects: every fill and stroke becomes an object of its own (strokes outlined, brushed strokes their brush art) grouped in paint order under the object's id and transparency, geometry effects are baked, raster effects become an embedded image (shadows and outer glows below the art; blur, feather and inner glow replace it), type with effects or fills of its own is outlined; Crop Marks become a group of the object and its marks; a group's or layer's own fills and strokes become objects among its members, which are expanded too. Hidden fills, strokes and effects are dropped. Enabled when a selected or targeted object's appearance isn't basic (`ids` then pick which objects) → {ids}",
+            "{ids?|id?: [..], target?} turn each object's appearance into objects: every fill and stroke becomes an object of its own (strokes outlined, brushed strokes their brush art) grouped in paint order under the object's id and transparency, geometry effects are baked, raster effects become an embedded image (shadows and outer glows below the art; blur, feather and inner glow replace it), type with effects or fills of its own is outlined; Crop Marks become a group of the object and its marks; a group's or layer's own fills and strokes become objects among its members, which are expanded too. Hidden fills, strokes and effects are dropped. Enabled when a selected or targeted object's appearance isn't basic (`ids` then pick which objects) → {ids}",
             can_expand,
             expand_appearance
         ),
@@ -68,7 +68,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Duplicate Effect",
             [],
             None,
-            "{index: int, item?: appearance item index|null (as effect.remove), ids?: [..]} insert a copy of the effect right after it → {ids}",
+            "{index: int, item?: appearance item index|null (as effect.remove), ids?|id?: [..], target?: \"object\"|\"contents\"} insert a copy of the effect right after it → {ids}",
             has_doc,
             duplicate
         ),
@@ -77,7 +77,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Move Effect",
             [],
             None,
-            "{from: int (position in the source list), to: int (its position in the destination list afterwards), fromItem?: appearance item index|null (the source list: that fill/stroke's effects, null the object's; omitted: the active item, else the object's), toItem?: item index|null (the destination list; default: the source list), copy?: bool (copy instead of move, as Alt-dragging the row), ids?: [..]} reorder an effect or move it between the object and its fills/strokes, as one undo step → {ids, index, item}",
+            "{from: int (position in the source list), to: int (its position in the destination list afterwards), fromItem?: appearance item index|null (the source list: that fill/stroke's effects, null the object's; omitted: the active item, else the object's), toItem?: item index|null (the destination list; default: the source list), copy?: bool (copy instead of move, as Alt-dragging the row), ids?|id?: [..], target?: \"object\"|\"contents\"} reorder an effect or move it between the object and its fills/strokes, as one undo step → {ids, index, item}",
             has_doc,
             move_effect
         ),
@@ -119,12 +119,17 @@ fn edit_effects(
 }
 
 fn check_revolve_count(n: &Node, cmd: &str) -> Result<()> {
-    let count = n.appearance.effects.iter().chain(n.appearance.items.iter().flat_map(|i| i.effects())).filter(|e| e.id == effects::REVOLVE).count();
-    if count > 1 {
+    let all = || n.appearance.effects.iter().chain(n.appearance.items.iter().flat_map(|i| i.effects()));
+    if all().filter(|e| e.id == effects::REVOLVE).count() > 1 {
         return Err(bad(cmd, "A profile supports one Revolve effect. Edit the existing effect's options instead."));
+    }
+    if all().filter(|e| effects::is_three_d(&e.id)).count() > 1 {
+        return Err(bad(cmd, ONE_3D));
     }
     Ok(())
 }
+
+const ONE_3D: &str = "An object takes one 3D effect. Edit the existing effect's options, or remove it first.";
 
 pub(crate) fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "effect.apply";
@@ -149,12 +154,19 @@ pub(crate) fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({ "ids": [gid.0], "index": 0, "item": null, "grouped": true }));
     }
     let item = item_target(s, p, C)?;
-    if id == effects::REVOLVE {
-        for id in appearance_targets(s, p)? {
-            let n = s.doc()?.doc.node(id).ok_or(EngineError::NoNode(id))?;
-            effects::validate_revolve(n, &effect.params).map_err(|e| bad(C, e))?;
-            if effects::has_revolve(n) {
-                return Err(bad(C, "A profile supports one Revolve effect. Edit the existing effect's options instead."));
+    if effects::is_three_d(id) {
+        for target in appearance_targets(s, p)? {
+            let n = s.doc()?.doc.node(target).ok_or(EngineError::NoNode(target))?;
+            if id == effects::REVOLVE {
+                effects::validate_revolve(n, &effect.params).map_err(|e| bad(C, e))?;
+                if effects::has_revolve(n) {
+                    return Err(bad(C, "A profile supports one Revolve effect. Edit the existing effect's options instead."));
+                }
+            } else {
+                effects::validate_solid(n, id, &effect.params).map_err(|e| bad(C, e))?;
+            }
+            if effects::has_revolve(n) || effects::has_solid(n) {
+                return Err(bad(C, ONE_3D));
             }
         }
     }
@@ -268,6 +280,20 @@ fn move_effect(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "ids": ids_json(&ids), "index": index, "item": item.flatten() }))
 }
 
+/// The ids of the effects `effect.setParams` with `p` edits, for the check of their parameters
+/// (none when `p` doesn't say which: running it reports why).
+pub(crate) fn set_params_effects(s: &Session, p: &Value) -> Vec<String> {
+    const C: &str = "effect.setParams";
+    let (Ok(index), Ok(item), Ok(ids), Ok(st)) = (index_param(p, "index", C), item_target(s, p, C), appearance_targets(s, p), s.doc()) else {
+        return vec![];
+    };
+    let effect = |id: &NodeId| {
+        let ap = &st.doc.node(*id)?.appearance;
+        Some(ap.effects_at(item.effects_item(ap, C).ok()?)?.get(index)?.id.clone())
+    };
+    ids.iter().filter_map(effect).collect()
+}
+
 fn set_params(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "effect.setParams";
     let index = index_param(p, "index", C)?;
@@ -281,14 +307,18 @@ fn set_params(s: &mut Session, p: &Value) -> Result<Value> {
         let n = s.doc()?.doc.node(id).ok_or(EngineError::NoNode(id))?;
         let target = item.effects_item(&n.appearance, C)?;
         if let Some(e) = n.appearance.effects_at(target).and_then(|fx| fx.get(index))
-            && e.id == effects::REVOLVE
+            && effects::is_three_d(&e.id)
             && visible != Some(false)
         {
             let mut prospective = effects::merged_params(&e.id, &e.params);
             if let (Some(cur), Some(new)) = (prospective.as_object_mut(), params.as_object()) {
                 cur.extend(new.clone());
             }
-            effects::validate_revolve(n, &prospective).map_err(|e| bad(C, e))?;
+            if e.id == effects::REVOLVE {
+                effects::validate_revolve(n, &prospective).map_err(|e| bad(C, e))?;
+            } else {
+                effects::validate_solid(n, &e.id, &prospective).map_err(|e| bad(C, e))?;
+            }
         }
     }
     let ids = edit_effects(s, p, item, C, "Effect Options", &format!("{C}: no effect at index {index}"), |fx| {
@@ -531,6 +561,45 @@ mod tests {
         assert_eq!(node(&s, id).path_data(), Some(&source));
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(effects_for_test(&s, id), before);
+    }
+
+    /// Extrude & Bevel, Inflate and Rotate: applied by command, saved and reopened, edited,
+    /// exported, expanded and undone; one 3D effect per object.
+    #[test]
+    fn solid_effects_apply_save_edit_export_expand_and_undo() {
+        for effect in effects::SOLIDS {
+            let (mut s, id) = session_with_rect();
+            let source = node(&s, id).path_data().unwrap().clone();
+            s.execute("effect.apply", &json!({"effect": effect, "ids": [id.0], "item": null})).unwrap();
+            let art = effects::solid_art(&node(&s, id)).unwrap();
+            assert_eq!(node(&s, id).path_data(), Some(&source), "{effect}: the source stays editable");
+            let doc = &s.doc().unwrap().doc;
+            let restored = vectorcraft_format::load(&vectorcraft_format::save(doc, false)).unwrap();
+            assert_eq!(effects::solid_art(restored.node(id).unwrap()).unwrap(), art, "{effect}: reopens the same");
+            // One 3D effect per object, whichever kind.
+            for other in ["threeD.revolve", "threeD.extrude", "threeD.rotate"] {
+                assert!(s.execute("effect.apply", &json!({"effect": other, "ids": [id.0], "item": null})).is_err(), "{effect} + {other}");
+            }
+            s.execute("effect.setParams", &json!({"index": 0, "params": {"rotationY": 50, "rotationX": 10}, "ids": [id.0], "item": null})).unwrap();
+            assert_ne!(effects::solid_art(&node(&s, id)).unwrap(), art, "{effect}: options change the art");
+            assert!(s.execute("effect.setParams", &json!({"index": 0, "params": {"bevel": "nope"}, "ids": [id.0], "item": null})).is_err());
+            let svg = s.execute("document.serialize", &json!({"format": "svg"})).unwrap();
+            let svg = svg["data"].as_str().or_else(|| svg["text"].as_str()).map(str::to_string).unwrap_or_else(|| svg.to_string());
+            assert!(svg.matches("<path").count() >= 2, "{effect}: exported as vector faces");
+            s.execute("effect.expandAppearance", &json!({"ids": [id.0]})).unwrap();
+            assert!(matches!(node(&s, id).kind, NodeKind::Group { .. }), "{effect}");
+            assert!(!effects::has_solid(&node(&s, id)));
+            s.execute("edit.undo", &json!({})).unwrap();
+            s.execute("edit.undo", &json!({})).unwrap();
+            s.execute("edit.undo", &json!({})).unwrap();
+            assert_eq!(node(&s, id).appearance.effects.len(), 0, "{effect}: back to the plain rectangle");
+        }
+        // Type has no outline to extrude.
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"width": 400, "height": 400})).unwrap();
+        let t = s.execute("text.create", &json!({"x": 50, "y": 50, "text": "3D"})).unwrap();
+        let err = s.execute("effect.apply", &json!({"effect": "threeD.extrude", "ids": [t["id"]], "item": null})).unwrap_err();
+        assert!(err.to_string().contains("requires a path"), "{err}");
     }
 
     fn effects_for_test(s: &Session, id: NodeId) -> vectorcraft_doc::Node {

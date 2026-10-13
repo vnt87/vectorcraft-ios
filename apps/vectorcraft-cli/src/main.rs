@@ -7,7 +7,7 @@
 //! vectorcraft-cli convert IN OUT [--scale 2] [--artboard 0 | --range 1-3,5] [--outline-text] [--decimals N] [--replace-lossy] [--editing-data]
 //! vectorcraft-cli info FILE
 //! vectorcraft-cli bench FILE [--size 2880x1800] [--iters 5]
-//! vectorcraft-cli perf [--paths 50000]
+//! vectorcraft-cli perf [--paths 50000] [--deep]
 //! ```
 // Denied, not forbidden: the font listers shared with the desktop app allow it for their
 // DirectWrite (Windows) and CoreText (macOS) calls, and nothing else may.
@@ -93,7 +93,8 @@ USAGE:
       precision (1–7, default 3). OUT may not be IN when reading
       IN left things out (hidden text, art or layers it could not read; the notes say which) unless
       --replace-lossy is given. --editing-data opens a .ai from its editing copy even where that
-      draws differently from its PDF part (which can be older), as long as it can be read.
+      draws differently from its PDF part (which can be older), as long as it can be read. The
+      result has the export's warnings, and importWarnings for what reading IN left out.
 
   vectorcraft-cli info FILE
       Print a JSON summary: the import warnings (what didn't come in as it was, such as an EPS
@@ -104,9 +105,11 @@ USAGE:
       Render FILE (any readable format) fitted to WxH (default 2880x1800) and print ms per frame
       (warm), multithreaded and single-threaded.
 
-  vectorcraft-cli perf [--paths N]
-      Check the performance budgets (render, pan, hit test, save/load, SVG, Pathfinder) on a
-      synthetic N-path document (default 50000). Exits non-zero if a budget is exceeded.
+  vectorcraft-cli perf [--paths N] [--deep]
+      Check the performance budgets (render, pan, hit test, save/load, SVG, Pathfinder, handle
+      and segment drags) on a synthetic N-path document (default 50000). Exits non-zero if a
+      budget is exceeded, unless the report says the machine is busy. --deep also times work with
+      no budget yet and prints memory use (the working set on Windows).
 ";
 
 /// The usage text plus the formats `document.open` reads and `document.export` writes.
@@ -235,19 +238,24 @@ fn convert(args: &[String]) -> Result<(), String> {
     }
     let [input, output] = <[String; 2]>::try_from(files).map_err(|_| "convert needs IN and OUT")?;
     let mut h = Headless::new();
-    if editing_data {
+    let opened = if editing_data {
         let params = json!({"path": input, "editingData": "always"});
-        h.call("engine.execute", json!({"command": "document.open", "params": params})).map_err(|e| format!("open {input}: {e}"))?;
+        h.call("engine.execute", json!({"command": "document.open", "params": params})).map_err(|e| format!("open {input}: {e}"))?
     } else {
-        h.call("app.open", json!({"path": input})).map_err(|e| format!("open {input}: {e}"))?;
-    }
+        h.call("app.open", json!({"path": input})).map_err(|e| format!("open {input}: {e}"))?
+    };
     // A conversion keeps hidden layers and objects, written hidden, where the format can (SVG,
     // PSD).
     let mut params = json!({"path": output, "scale": scale, "artboard": artboard, "range": range, "outlineText": outline_text, "hiddenLayers": true, "acknowledgeLoss": replace_lossy});
     if let Some(decimals) = decimals {
         params["decimals"] = json!(decimals);
     }
-    let r = h.call("engine.execute", json!({"command": "document.export", "params": params})).map_err(|e| format!("export {output}: {e}"))?;
+    let mut r = h.call("engine.execute", json!({"command": "document.export", "params": params})).map_err(|e| format!("export {output}: {e}"))?;
+    // What reading the input left out (a missing linked file, an unsupported filter…) matters as
+    // much as what writing the output did.
+    if let (Some(w), Some(out)) = (opened.get("warnings").filter(|w| w.as_array().is_some_and(|a| !a.is_empty())), r.as_object_mut()) {
+        out.insert("importWarnings".into(), w.clone());
+    }
     outln!("{r}");
     Ok(())
 }

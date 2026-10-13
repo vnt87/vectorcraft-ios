@@ -35,7 +35,7 @@ use vectorcraft_render::effects;
 
 use super::edit::roots_of;
 use super::menucmds::{MAX_PIXELS, isolated_doc, unique_key};
-use super::pathops::{node_path, outline_strokes, outline_strokes_under, shape_node};
+use super::pathops::{node_path, outline_strokes, outline_strokes_under, separate, shape_node};
 use super::*;
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Flatten Transparency…",
             ["Object"],
             None,
-            "{preset?: \"high\"|\"medium\"|\"low\" or a saved preset's name (see flattener.presets.list; default medium), balance?: 0..100 (raster/vector balance; 0 rasterizes everything), lineArtPpi?: 1..2400, gradientPpi?: 1..2400 (areas only gradients and meshes reach), textToOutlines?, strokesToOutlines?, clipComplexRegions? (clip images to the region outlines, else rectangles), antiAlias?, preserveAlpha? (composite over nothing instead of white), preserveOverprints? (areas showing one paint keep its colour and overprint; false clears overprints), options?: {the same keys}, ids?} overlapping transparent objects become one group of flat-colour regions (CMYK colours composited ink by ink in CMYK documents), plus an image where gradients, patterns, images, masks or raster effects reach; objects without transparency stay → {ids, rasterized: images made, vector: regions made, options}",
+            "{preset?: \"high\"|\"medium\"|\"low\" or a saved preset's name (see flattener.presets.list; default medium), balance?: 0..100 (raster/vector balance; 0 rasterizes everything), lineArtPpi?: 1..2400, gradientPpi?: 1..2400 (areas only gradients and meshes reach), textToOutlines?, strokesToOutlines?, clipComplexRegions? (clip images to the region outlines, else rectangles), antiAlias?, preserveAlpha? (composite over nothing instead of white), preserveOverprints? (areas showing one paint keep its colour and overprint; false clears overprints), options?: {the same keys}, ids?|id?} overlapping transparent objects become one group of flat-colour regions (CMYK colours composited ink by ink in CMYK documents), plus an image where gradients, patterns, images, masks or raster effects reach; objects without transparency stay → {ids, rasterized: images made, vector: regions made, options}",
             has_doc,
             flatten
         ),
@@ -99,7 +99,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Flattener Preview",
             [],
             None,
-            "{highlight?: \"none\"|\"rasterizedRegions\" (areas the raster/vector balance rasterizes whole)|\"transparentObjects\"|\"allAffected\"|\"expandedPatterns\" (pattern art taking part)|\"outlinedStrokes\"|\"outlinedText\"|\"allRasterized\" (default none), overprints?: \"preserve\"|\"simulate\"|\"discard\" (simulate and discard flatten without preserveOverprints), preset?, …options (as object.flattenTransparency), ids?: (default: the whole document)} what flattening would do, without changing anything → {highlight, regions: [{bounds: {x, y, width, height}, id?}] (the highlighted objects, or areas), counts: {transparentObjects, allAffected, expandedPatterns, outlinedStrokes, outlinedText, rasterizedRegions, allRasterized, vectorRegions}, options}",
+            "{highlight?: \"none\"|\"rasterizedRegions\" (areas the raster/vector balance rasterizes whole)|\"transparentObjects\"|\"allAffected\"|\"expandedPatterns\" (pattern art taking part)|\"outlinedStrokes\"|\"outlinedText\"|\"allRasterized\" (default none), overprints?: \"preserve\"|\"simulate\"|\"discard\" (simulate and discard flatten without preserveOverprints), preset?, …options as object.flattenTransparency, ids?|id?: (default: the whole document)} what flattening would do, without changing anything → {highlight, regions: [{bounds: {x, y, width, height}, id?}] (the highlighted objects, or areas), counts: {transparentObjects, allAffected, expandedPatterns, outlinedStrokes, outlinedText, rasterizedRegions, allRasterized, vectorRegions}, options}",
             has_doc,
             preview
         ),
@@ -1038,7 +1038,10 @@ pub(crate) fn flatten_document(doc: &Document, o: &FlattenOptions) -> Result<Opt
 
 fn apply(d: &mut Document, sel: &mut vectorcraft_doc::Selection, plan: Plan, o: &FlattenOptions) -> Result<(Vec<NodeId>, usize, usize)> {
     let (mut vector, mut rasterized) = (0, 0);
-    let mut ids = vec![];
+    let (mut ids, mut flat) = (vec![], vec![]);
+    // The groups replace their objects in one pass at the end. When an object is listed twice or
+    // lies inside another listed one, each group replaces its objects as it is made instead.
+    let one_pass = separate(d, &plan.flat.iter().flat_map(|f| f.roots.iter().copied()).collect::<Vec<_>>());
     for f in plan.flat {
         // A group always has objects.
         let Some(&top) = f.roots.last() else { continue };
@@ -1060,12 +1063,22 @@ fn apply(d: &mut Document, sel: &mut vectorcraft_doc::Selection, plan: Plan, o: 
             children.push(Arc::new(n));
             vector += 1;
         }
-        let (par, idx, _) = d.position(top).ok_or(EngineError::NoNode(top))?;
         let g = Node::group(d.alloc_id(), children);
-        ids.push(d.insert(par, idx + 1, g)?);
-        for r in &f.roots {
-            d.remove(*r)?;
+        ids.push(g.id);
+        if one_pass {
+            // The group replaces the topmost object, and the other objects are removed.
+            flat.extend(f.roots.iter().filter(|r| **r != top).map(|r| (*r, vec![])));
+            flat.push((top, vec![g]));
+        } else {
+            let (par, idx, _) = d.position(top).ok_or(EngineError::NoNode(top))?;
+            d.insert(par, idx + 1, g)?;
+            for r in &f.roots {
+                d.remove(*r)?;
+            }
         }
+    }
+    if !flat.is_empty() {
+        d.insert_beside(flat, true)?;
     }
     let brushes = if o.strokes_to_outlines { vectorcraft_brush::library(d) } else { vec![] };
     for mut id in plan.kept {
@@ -1113,9 +1126,8 @@ fn outline_texts_under(d: &mut Document, root: NodeId) -> Result<NodeId> {
     for t in texts {
         let Some(o) = outlined_text(&t) else { continue };
         let o = d.reid(&o);
-        let (par, idx, _) = d.position(t.id).ok_or(EngineError::NoNode(t.id))?;
-        let nid = d.insert(par, idx, o)?;
-        d.remove(t.id)?;
+        let nid = o.id;
+        *d.node_mut(t.id).ok_or(EngineError::NoNode(t.id))? = o;
         if t.id == root {
             out = nid;
         }

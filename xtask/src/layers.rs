@@ -63,6 +63,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("metafile", Class::Layer(3)),
     ("plugins", Class::Layer(2)),
     ("affinity", Class::Standalone),
+    ("scriptcheck", Class::Standalone),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
@@ -81,6 +82,8 @@ pub const INTRA_LAYER_ORDER: &[&[&str]] = &[
     &["pdf", "eps"],
     &["plugins", "effects"],
     &["three-d", "effects"],
+    // Inflate cuts its surface's grid cells to the shape with Pathfinder's booleans.
+    &["pathops", "three-d"],
 ];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {

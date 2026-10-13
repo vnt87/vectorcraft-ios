@@ -247,6 +247,7 @@
 	Author Title:	Cargo del autor:
 	Author:	Autor:
 	Auto	Auto
+	Auto Color	Color automático
 	Automatic	Automático
 	Auto Size New Area Type	Ajustar automáticamente el tamaño del nuevo texto de área
 	Auto Spell Check	Revisión ortográfica automática
@@ -368,6 +369,59 @@
 	Character Style Options	Opciones de estilo de carácter
 	Character Styles	Estilos de carácter
 	Check Links	Comprobar vínculos
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	Comprobar script
+	Check Script…	Comprobar script…
+	Copy Report	Copiar informe
+	VectorCraft read this script without running it.	VectorCraft leyó este script sin ejecutarlo.
+	Needs nothing beyond plain JavaScript	Solo necesita JavaScript simple
+	Needs the script language's own objects or directives	Necesita objetos o directivas propios del lenguaje del script
+	Needs the document model	Necesita el modelo de documento
+	Needs files	Necesita archivos
+	Needs menu commands	Necesita comandos de menú
+	Needs dialogs	Necesita cuadros de diálogo
+	Needs features only the reference app has	Necesita funciones que solo tiene la aplicación de referencia
+	Outside the document	Fuera del documento
+	Writes, moves or deletes files	Escribe, mueve o elimina archivos
+	Opens files in other apps	Abre archivos en otras aplicaciones
+	Opens network connections	Abre conexiones de red
+	Loads native code	Carga código nativo
+	Sends messages to other apps	Envía mensajes a otras aplicaciones
+	Reads or sets environment variables	Lee o define variables de entorno
+	Runs code the checker can't read	Ejecuta código que la comprobación no puede leer
+	Changes the reference app's preferences	Cambia las preferencias de la aplicación de referencia
+	Menu commands	Comandos de menú
+	Names the script builds as it runs: {count}	Nombres que el script arma al ejecutarse: {count}
+	Document model	Modelo de documento
+	Object types: {names}	Tipos de objeto: {names}
+	Directives	Directivas
+	Includes	Archivos incluidos
+	Checked	Comprobado
+	Not followed: outside the script's folder	Omitido: fuera de la carpeta del script
+	Includes itself	Se incluye a sí mismo
+	Not read	No leído
+	Not read: a limit was reached	No leído: se alcanzó un límite
+	Compiled or not text	Compilado o no es texto
+	Problems	Problemas
+	String not closed	Cadena sin cerrar
+	Comment not closed	Comentario sin cerrar
+	Regular expression not closed	Expresión regular sin cerrar
+	Template literal not closed	Literal de plantilla sin cerrar
+	XML literal not closed	Literal XML sin cerrar
+	Bracket never closed	Delimitador sin cerrar
+	Closing bracket with no opening one	Delimitador de cierre sin apertura
+	Syntax newer than ES3	Sintaxis más reciente que ES3
+	Unknown directive	Directiva desconocida
+	Not valid UTF-8: unreadable bytes were replaced	UTF-8 no válido: se reemplazaron los bytes ilegibles
+	Mixed line endings	Finales de línea mezclados
+	Nesting too deep to follow	Anidamiento demasiado profundo para seguirlo
+	line {line}	línea {line}
+	lines {lines}	líneas {lines}
+	{file}, line {line}	{file}, línea {line}
+	Compiled script: ask its author for the .jsx file	Script compilado: pídele el archivo .jsx a su autor
+	Too large to check	Demasiado grande para comprobarlo
+	Not a script for the reference app	No es un script para la aplicación de referencia
+	Some lists were cut short at their limit.	Algunas listas se recortaron al llegar a su límite.
 	Check Spelling…	Revisar ortografía…
 	Choose a folder	Elige una carpeta
 	Choose…	Elegir…
@@ -1143,6 +1197,8 @@
 	Graphic Style Library	Biblioteca de estilos gráficos
 	Graphic Style Options	Opciones de estilo gráfico
 	Graphic Style Options…	Opciones de estilo gráfico…
+	Symbol Options	Opciones de símbolo
+	Symbol Options…	Opciones de símbolo…
 	Graphic Styles	Estilos gráficos
 	Graphic Styles Options	Opciones de estilos gráficos
 	Graphics	Gráficos
@@ -1243,6 +1299,8 @@
 	Identify Objects By	Identificar objetos por
 	Ignore	Ignorar
 	Ignore Artboards (all the art as one page)	Ignorar mesas de trabajo (toda la ilustración como una página)
+	Auto Grouping	Agrupación automática
+	Ignore Color	Ignorar color
 	Ignore White	Ignorar blanco
 	Palette:	Paleta:
 	Limited	Limitada
@@ -2737,6 +2795,8 @@
 	Spiral Tool	Herramienta Espiral
 	Split Freeform Line	Dividir línea libre
 	Split Into Grid	Dividir en cuadrícula
+	Total:	Total:
+	Add Guides	Agregar guías
 	Split Into Grid…	Dividir en cuadrícula…
 	Split Path	Dividir trazado
 	spot	plana
@@ -3230,6 +3290,7 @@
 	{warning}: click to correct to the closest color ({hex})	{warning}: clic para corregir al color más cercano ({hex})
 	“{file}” is protected by a password.	“{file}” está protegido con contraseña.
 	● Recording	● Grabando
+imageTrace	Outline	Contorno
 @plural	{n} item|{n} items	{n} elemento|{n} elementos
 @plural	Color Table ({n} color)|Color Table ({n} colors)	Tabla de colores ({n} color)|Tabla de colores ({n} colores)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	¿Eliminar {n} estilo gráfico?|¿Eliminar estos {n} estilos gráficos?
@@ -3394,6 +3455,7 @@ axis	Both	Ambos
 @msg	Convert to Artboards: selection has no area	Convertir en mesas de trabajo: la selección no tiene área
 @msg	Convert to Shape: no rectangles or ellipses selected	Convertir en forma: no hay rectángulos ni elipses seleccionados
 @msg	Copied the CSS of {rules} object(s)	Se copió el CSS de {rules} objeto(s)
+@msg	Copied the script report	Se copió el informe del script
 @msg	Corners edits the corners of a path	Esquinas edita las esquinas de un trazado
 @msg	Couldn't copy to the system clipboard: {e}	No se pudo copiar al portapapeles del sistema: {e}
 @msg	Couldn't open {name}: {e}	No se pudo abrir {name}: {e}
@@ -3429,6 +3491,7 @@ axis	Both	Ambos
 @msg	No saved selections (Select → Save Selection…)	No hay selecciones guardadas (Selección → Guardar selección…)
 @msg	No saved views (View → New View…)	No hay vistas guardadas (Ver → Nueva vista…)
 @msg	Offset Path: select paths	Desplazar trazado: selecciona trazados
+@msg	Offset Path: the offset leaves nothing of the selected paths (an inset larger than the shapes)	Desplazar trazado: el desplazamiento no deja nada de los trazados seleccionados (un desplazamiento hacia dentro mayor que las formas)
 @msg	Opened with {_1} note(s): {_2}	Se abrió con {_1} nota(s): {_2}
 @msg	Opened {url}	Se abrió {url}
 @msg	Outline Stroke: no stroked paths selected	Contornear trazo: no hay trazados con trazo seleccionados
@@ -3884,6 +3947,7 @@ axis	Both	Ambos
 @msg	{name}: no such recovery entry	{name}: no existe esa entrada de recuperación
 @msg	{path} can't be found: relink it first	no se encuentra {path}: vuelve a vincularlo primero
 @msg	{path}: no file system here (pass dataBase64 to open; omit the path to get dataBase64)	{path}: aquí no hay sistema de archivos (pasa dataBase64 para abrir; omite la ruta para obtener dataBase64)
+@msg	{path}: not a file	{path}: no es un archivo
 @msg	{path}: {e}	{path}: {e}
 @msg	{status} ({e})	{status} ({e})
 @msg	Couldn't place {name}: {e}	No se pudo colocar {name}: {e}
@@ -4574,3 +4638,48 @@ mark-style	Japanese	Japonesas
 	X:	X:
 	Y:	Y:
 @id	file.close	Cerrar archivo
+	Select two or more objects, or a group	Seleccione dos o más objetos, o un grupo
+# 3D and Materials › Extrude & Bevel, Inflate and Rotate: options, Position presets and bevel shapes.
+	Back	Posterior
+	Both sides	Ambos lados
+	Classic	Clásico
+	Cove	Cóncavo
+	Depth	Profundidad
+	Front	Frontal
+	Isometric Bottom	Isométrica inferior
+	Isometric Left	Isométrica izquierda
+	Isometric Right	Isométrica derecha
+	Isometric Top	Isométrica superior
+	Off-Axis Back	Fuera de eje posterior
+	Off-Axis Bottom	Fuera de eje inferior
+	Off-Axis Front	Fuera de eje frontal
+	Off-Axis Left	Fuera de eje izquierda
+	Off-Axis Right	Fuera de eje derecha
+	Off-Axis Top	Fuera de eje superior
+	Ogee	Gola
+	Reset all 3D settings to their defaults.	Restablecer todos los ajustes 3D a sus valores predeterminados.
+	Step	Escalón
+	Taper	Estrechamiento
+	Twist	Torsión
+	Volume	Volumen
+3d	Cap	Tapa
+3d	Solid	Sólido
+3d	Hollow	Hueco
+3d	Bevel	Bisel
+3d	Rounded	Redondeado
+3d	Space	Espacio
+	Bevel Shape	Forma del bisel
+	Bevel Inside	Bisel hacia dentro
+	Bevel both sides	Bisel en ambos lados
+	Presets	Ajustes preestablecidos
+@msg	An object takes one 3D effect. Edit the existing effect's options, or remove it first.	Un objeto admite un solo efecto 3D. Edite las opciones del efecto existente o quítelo primero.
+@msg	{label} currently requires a path or compound path. Convert type, images and groups to paths first.	{label} requiere por ahora un trazado o un trazado compuesto. Convierta primero el texto, las imágenes y los grupos en trazados.
+@msg	{label} requires a shape with at least two anchors	{label} requiere una forma con al menos dos puntos de ancla
+@msg	The shape is too complex for a 3D effect	La forma es demasiado compleja para un efecto 3D
+@msg	The 3D surface is too complex; simplify the shape	La superficie 3D es demasiado compleja; simplifique la forma
+	Transform Objects	Transformar objetos
+@msg	unknown parameter `{key}`; did you mean `{near}`?	parámetro desconocido `{key}`; ¿quiso decir `{near}`?
+@msg	unknown parameter `{key}`; the command takes no parameters	parámetro desconocido `{key}`; el comando no tiene parámetros
+@msg	unknown parameter `{key}`; the command takes: {keys}	parámetro desconocido `{key}`; el comando acepta: {keys}
+	Load EPS into Clipboard	Cargar EPS en el portapapeles
+@msg	an image of {w} × {h} pixels is too large to draw	una imagen de {w} × {h} píxeles es demasiado grande para dibujarse

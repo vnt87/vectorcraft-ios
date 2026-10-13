@@ -205,6 +205,7 @@
 	Author Title:	作者职务：
 	Author:	作者：
 	Auto	自动
+	Auto Color	自动颜色
 	Automatic	自动
 	Auto Size New Area Type	自动调整新区域文字大小
 	Auto Spell Check	自动拼写检查
@@ -329,6 +330,59 @@
 	Character Style Options	字符样式选项
 	Character Styles	字符样式
 	Check Links	检查链接
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	检查脚本
+	Check Script…	检查脚本…
+	Copy Report	复制报告
+	VectorCraft read this script without running it.	VectorCraft 读取了此脚本，但没有运行它。
+	Needs nothing beyond plain JavaScript	只需要普通的 JavaScript
+	Needs the script language's own objects or directives	需要脚本语言自身的对象或指令
+	Needs the document model	需要文档模型
+	Needs files	需要文件
+	Needs menu commands	需要菜单命令
+	Needs dialogs	需要对话框
+	Needs features only the reference app has	需要只有参考应用才有的功能
+	Outside the document	文档之外
+	Writes, moves or deletes files	写入、移动或删除文件
+	Opens files in other apps	在其他应用中打开文件
+	Opens network connections	打开网络连接
+	Loads native code	加载本机代码
+	Sends messages to other apps	向其他应用发送消息
+	Reads or sets environment variables	读取或设置环境变量
+	Runs code the checker can't read	运行检查无法读取的代码
+	Changes the reference app's preferences	更改参考应用的首选项
+	Menu commands	菜单命令
+	Names the script builds as it runs: {count}	脚本在运行时组成的名称：{count}
+	Document model	文档模型
+	Object types: {names}	对象类型：{names}
+	Directives	指令
+	Includes	包含的文件
+	Checked	已检查
+	Not followed: outside the script's folder	已跳过：在脚本文件夹之外
+	Includes itself	包含自身
+	Not read	未读取
+	Not read: a limit was reached	未读取：已达到上限
+	Compiled or not text	已编译或不是文本
+	Problems	问题
+	String not closed	字符串未闭合
+	Comment not closed	注释未闭合
+	Regular expression not closed	正则表达式未闭合
+	Template literal not closed	模板字面量未闭合
+	XML literal not closed	XML 字面量未闭合
+	Bracket never closed	括号未闭合
+	Closing bracket with no opening one	闭合括号没有对应的左括号
+	Syntax newer than ES3	比 ES3 更新的语法
+	Unknown directive	未知指令
+	Not valid UTF-8: unreadable bytes were replaced	不是有效的 UTF-8：无法读取的字节已被替换
+	Mixed line endings	换行符混用
+	Nesting too deep to follow	嵌套过深，无法跟踪
+	line {line}	第 {line} 行
+	lines {lines}	第 {lines} 行
+	{file}, line {line}	{file}，第 {line} 行
+	Compiled script: ask its author for the .jsx file	已编译的脚本：请向作者索取 .jsx 文件
+	Too large to check	太大，无法检查
+	Not a script for the reference app	不是参考应用的脚本
+	Some lists were cut short at their limit.	部分列表已在上限处截断。
 	Check Spelling…	检查拼写…
 	Choose a folder	选择文件夹
 	Choose…	选择…
@@ -1093,6 +1147,8 @@
 	Graphic Style Library	图形样式库
 	Graphic Style Options	图形样式选项
 	Graphic Style Options…	图形样式选项…
+	Symbol Options	符号选项
+	Symbol Options…	符号选项…
 	Graphic Styles	图形样式
 	Graphic Styles Options	图形样式选项
 	Graphics	图形
@@ -1188,6 +1244,8 @@
 	Identify Objects By	对象识别方式
 	Ignore	忽略
 	Ignore Artboards (all the art as one page)	忽略画板 (所有图稿作为一页)
+	Auto Grouping	自动编组
+	Ignore Color	忽略颜色
 	Ignore White	忽略白色
 	Palette:	调板：
 	Limited	有限
@@ -2624,6 +2682,8 @@
 	Spiral Tool	螺旋工具
 	Split Freeform Line	分割自由曲线
 	Split Into Grid	分割为网格线
+	Total:	总计：
+	Add Guides	添加参考线
 	Split Into Grid…	分割为网格…
 	Split Path	分割路径
 	spot	专色
@@ -3123,6 +3183,7 @@
 	{warning}: click to correct to the closest color ({hex})	{warning}：单击以修正为最接近的颜色 ({hex})
 	“{file}” is protected by a password.	“{file}”受密码保护。
 	● Recording	● 录制中
+imageTrace	Outline	轮廓
 @plural	{n} item|{n} items	{n} 个项目
 @plural	Color Table ({n} color)|Color Table ({n} colors)	颜色表 ({n} 色)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	要删除这 {n} 个图形样式吗？
@@ -3793,3 +3854,48 @@ lighting	Light	光源
 	Use Outside Rectangle As Frame	使用外部矩形作为框架
 	Create Compound Path From Ellipses	从椭圆形创建复合路径
 	Fill Grid	网格填色
+	Select two or more objects, or a group	请选择两个或更多对象，或一个组
+# 3D and Materials › Extrude & Bevel, Inflate and Rotate: options, Position presets and bevel shapes.
+	Back	背面
+	Both sides	双面
+	Classic	经典
+	Cove	凹圆
+	Depth	深度
+	Front	正面
+	Isometric Bottom	等角底部
+	Isometric Left	等角左侧
+	Isometric Right	等角右侧
+	Isometric Top	等角顶部
+	Off-Axis Back	离轴背面
+	Off-Axis Bottom	离轴底部
+	Off-Axis Front	离轴正面
+	Off-Axis Left	离轴左侧
+	Off-Axis Right	离轴右侧
+	Off-Axis Top	离轴顶部
+	Ogee	反曲线
+	Reset all 3D settings to their defaults.	将所有 3D 设置重置为默认值。
+	Step	阶梯
+	Taper	锥化
+	Twist	扭转
+	Volume	体积
+3d	Cap	封口
+3d	Solid	实心
+3d	Hollow	空心
+3d	Bevel	斜角
+3d	Rounded	圆角
+3d	Space	间距
+	Bevel Shape	斜角形状
+	Bevel Inside	斜角向内
+	Bevel both sides	双面斜角
+	Presets	预设
+@msg	An object takes one 3D effect. Edit the existing effect's options, or remove it first.	一个对象只能应用一种 3D 效果。请编辑现有效果的选项，或先将其移去。
+@msg	{label} currently requires a path or compound path. Convert type, images and groups to paths first.	{label}目前需要路径或复合路径。请先将文字、图像和编组转换为路径。
+@msg	{label} requires a shape with at least two anchors	{label}需要至少有两个锚点的形状
+@msg	The shape is too complex for a 3D effect	形状过于复杂，无法应用 3D 效果
+@msg	The 3D surface is too complex; simplify the shape	3D 表面过于复杂；请简化形状
+	Transform Objects	变换对象
+@msg	unknown parameter `{key}`; did you mean `{near}`?	未知参数 `{key}`；您是否想输入 `{near}`？
+@msg	unknown parameter `{key}`; the command takes no parameters	未知参数 `{key}`；该命令没有参数
+@msg	unknown parameter `{key}`; the command takes: {keys}	未知参数 `{key}`；该命令接受：{keys}
+	Load EPS into Clipboard	将 EPS 载入剪贴板
+@msg	an image of {w} × {h} pixels is too large to draw	{w} × {h} 像素的图像过大，无法绘制

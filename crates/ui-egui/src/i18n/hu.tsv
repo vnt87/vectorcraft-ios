@@ -360,6 +360,7 @@
 	Auto Spell Check	Automatikus helyesírás-ellenőrzés
 	Auto-Collapse Iconic Panels	Ikonpanelek automatikus becsukása
 	Auto-Rotate (turn the paper to each artboard)	Automatikus elforgatás (a papír igazodik minden rajztáblához)
+	Auto Color	Automatikus szín
 	Automatic	Automatikus
 	Automatic flatness	Automatikus simaság
 	Automatically	Automatikusan
@@ -530,6 +531,59 @@
 	Character Styles	Karakterstílusok
 	Character:	Karakter:
 	Check Links	Csatolások ellenőrzése
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	Szkript ellenőrzése
+	Check Script…	Szkript ellenőrzése…
+	Copy Report	Jelentés másolása
+	VectorCraft read this script without running it.	A VectorCraft futtatás nélkül olvasta be ezt a szkriptet.
+	Needs nothing beyond plain JavaScript	Csak egyszerű JavaScript kell hozzá
+	Needs the script language's own objects or directives	A szkriptnyelv saját objektumai vagy direktívái kellenek hozzá
+	Needs the document model	A dokumentummodell kell hozzá
+	Needs files	Fájlok kellenek hozzá
+	Needs menu commands	Menüparancsok kellenek hozzá
+	Needs dialogs	Párbeszédablakok kellenek hozzá
+	Needs features only the reference app has	Olyan funkciók kellenek hozzá, amelyek csak a referenciaalkalmazásban vannak
+	Outside the document	A dokumentumon kívül
+	Writes, moves or deletes files	Fájlokat ír, áthelyez vagy töröl
+	Opens files in other apps	Fájlokat nyit meg más alkalmazásokban
+	Opens network connections	Hálózati kapcsolatokat nyit
+	Loads native code	Natív kódot tölt be
+	Sends messages to other apps	Üzeneteket küld más alkalmazásoknak
+	Reads or sets environment variables	Környezeti változókat olvas vagy állít be
+	Runs code the checker can't read	Olyan kódot futtat, amelyet az ellenőrzés nem tud beolvasni
+	Changes the reference app's preferences	Módosítja a referenciaalkalmazás beállításait
+	Menu commands	Menüparancsok
+	Names the script builds as it runs: {count}	A szkript által futás közben előállított nevek: {count}
+	Document model	Dokumentummodell
+	Object types: {names}	Objektumtípusok: {names}
+	Directives	Direktívák
+	Includes	Beillesztett fájlok
+	Checked	Ellenőrizve
+	Not followed: outside the script's folder	Kihagyva: a szkript mappáján kívül esik
+	Includes itself	Önmagát illeszti be
+	Not read	Nincs beolvasva
+	Not read: a limit was reached	Nincs beolvasva: korlát elérve
+	Compiled or not text	Lefordított vagy nem szöveg
+	Problems	Problémák
+	String not closed	Lezáratlan karakterlánc
+	Comment not closed	Lezáratlan megjegyzés
+	Regular expression not closed	Lezáratlan reguláris kifejezés
+	Template literal not closed	Lezáratlan sablonliterál
+	XML literal not closed	Lezáratlan XML-literál
+	Bracket never closed	Nyitva maradt zárójel
+	Closing bracket with no opening one	Záró zárójel nyitó pár nélkül
+	Syntax newer than ES3	Az ES3-nál újabb szintaxis
+	Unknown directive	Ismeretlen direktíva
+	Not valid UTF-8: unreadable bytes were replaced	Érvénytelen UTF-8: az olvashatatlan bájtok lecserélve
+	Mixed line endings	Vegyes sorvégek
+	Nesting too deep to follow	Túl mély egymásba ágyazás
+	line {line}	sor: {line}
+	lines {lines}	sorok: {lines}
+	{file}, line {line}	{file}, sor: {line}
+	Compiled script: ask its author for the .jsx file	Lefordított szkript: kérd el a szerzőjétől a .jsx fájlt
+	Too large to check	Túl nagy az ellenőrzéshez
+	Not a script for the reference app	Nem a referenciaalkalmazáshoz írt szkript
+	Some lists were cut short at their limit.	Egyes listák a korlátjuknál megszakadtak.
 	Check Spelling…	Helyesírás-ellenőrzés…
 	Chevron	Csúcsos nyíl
 	Choose a folder	Válassz mappát
@@ -1468,6 +1522,8 @@
 	Graphic Style Library	Grafikaistílus-könyvtár
 	Graphic Style Options	Grafikai stílus beállításai
 	Graphic Style Options…	Grafikai stílus beállításai…
+	Symbol Options	Szimbólum beállításai
+	Symbol Options…	Szimbólum beállításai…
 	Graphic Styles	Grafikai stílusok
 	Graphic Styles (4)	Grafikai stílusok (4)
 	Graphic Styles Options	Grafikai stílusok beállításai
@@ -1607,6 +1663,8 @@
 	Identify Objects By	Objektumok azonosítása
 	Ignore	Kihagy
 	Ignore Artboards (all the art as one page)	Rajztáblák figyelmen kívül hagyása (az összes grafika egy oldalon)
+	Auto Grouping	Automatikus csoportosítás
+	Ignore Color	Szín figyelmen kívül hagyása
 	Ignore White	Fehér figyelmen kívül hagyása
 	Image	Kép
 	Image Info	Kép adatai
@@ -3339,6 +3397,8 @@
 	Split Complementary	Felosztott kiegészítő
 	Split Freeform Line	Szabad formájú vonal kettévágása
 	Split Into Grid	Felosztás rácsra
+	Total:	Összesen:
+	Add Guides	Segédvonalak hozzáadása
 	Split Into Grid…	Felosztás rácsra…
 	Split Path	Útvonal kettévágása
 	spot	direkt
@@ -3929,6 +3989,7 @@ lighting	Light	Fény
 theme	Appearance	Kinézet
 
 # Plurals: one|other
+imageTrace	Outline	Körvonal
 @plural	Color Table ({n} color)|Color Table ({n} colors)	Színtábla ({n} szín)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	{n} grafikai stílus törlése?
 @plural	{n} area highlighted|{n} areas highlighted	Kiemelt terület: {n}
@@ -4023,7 +4084,7 @@ theme	Appearance	Kinézet
 @msg	already editing a pattern	már folyik egy mintázat szerkesztése
 @msg	an image VectorCraft can't read was left out	kimaradt egy kép, amelyet a VectorCraft nem tud olvasni
 @msg	an image whose data is cut short was left out	kimaradt egy csonka adatú kép
-@msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	a csatolt képek a fájlban mentett kis felbontású előnézetet mutatják, amíg a fájljaik elő nem kerülnek: csatolja őket újra a Csatolások panelen
+@msg	linked pictures show the low-resolution preview saved in the file until their files are found: relink them in the Links panel	a csatolt képek a fájlban mentett kis felbontású előnézetet mutatják, amíg a fájljaik elő nem kerülnek: csatold őket újra a Csatolások panelen
 @msg	area type in frames too short for a line of the font it shows in got taller frames ({_1}): their type wouldn't show otherwise	a túl alacsony keretben lévő területszöveg, amelybe a megjelenítő betűtípus egy sora sem fér el, magasabb keretet kapott ({_1}): különben nem látszana
 @msg	an object can't be read	egy objektum nem olvasható
 @msg	an object in perspective would leave the edited grid	egy perspektivikus objektum kikerülne a szerkesztett rácsból
@@ -4081,6 +4142,7 @@ theme	Appearance	Kinézet
 @msg	Convert to Artboards: selection has no area	Átalakítás rajztáblákká: a kijelölésnek nincs területe
 @msg	Convert to Shape: no rectangles or ellipses selected	Átalakítás alakzattá: nincs kijelölt téglalap vagy ellipszis
 @msg	Copied the CSS of {rules} object(s)	CSS másolva, objektumok: {rules}
+@msg	Copied the script report	Szkriptjelentés másolva
 @msg	Corners edits the corners of a path	a Sarkok parancs egy útvonal sarkait szerkeszti
 @msg	could not decode image: {0}	a kép nem dekódolható: {0}
 @msg	Couldn't copy to the system clipboard: {e}	Nem sikerült a rendszer vágólapjára másolni: {e}
@@ -4327,6 +4389,7 @@ theme	Appearance	Kinézet
 @msg	object {id} is not a selected top-level object	az objektum nem kijelölt legfelső szintű objektum: {id}
 @msg	objects with several fills or strokes, effects or brushes came in as their drawn look ({_1}): their appearance isn't editable yet	a több kitöltésű vagy körvonalú, effektusos vagy ecsetes objektumok a megrajzolt kinézetükkel kerültek be ({_1}): a megjelenésük még nem szerkeszthető
 @msg	Offset Path: select paths	Útvonal eltolása: jelölj ki útvonalakat
+@msg	Offset Path: the offset leaves nothing of the selected paths (an inset larger than the shapes)	Útvonal eltolása: az eltolás után semmi sem marad a kijelölt útvonalakból (a befelé eltolás nagyobb az alakzatoknál)
 @msg	onto must name a floating panel	az onto egy lebegő panelt kell megnevezzen
 @msg	onto must name a panel floating in another group	az onto egy másik csoportban lebegő panelt kell megnevezzen
 @msg	Opened with {_1} note(s): {_2}	Megnyitva; megjegyzések: {_1}: {_2}
@@ -4585,6 +4648,7 @@ theme	Appearance	Kinézet
 @msg	{path} can't be found: relink it first	nem található: {path}; előbb csatold újra
 @msg	{path} is not a folder	nem mappa: {path}
 @msg	{path}: no file system here (pass dataBase64 to open; omit the path to get dataBase64)	{path}: itt nincs fájlrendszer (megnyitáshoz add meg a dataBase64-et; az útvonal elhagyásával dataBase64-et kapsz)
+@msg	{path}: not a file	{path}: nem fájl
 @msg	{path}: {e}	{path}: {e}
 @msg	{status} ({e})	{status} ({e})
 @msg	{tool} isn't in a toolbar group of several tools	az eszköz nincs többeszközös eszköztár-csoportban: {tool}
@@ -4600,3 +4664,48 @@ theme	Appearance	Kinézet
 	Use Outside Rectangle As Frame	Külső téglalap használata keretként
 	Create Compound Path From Ellipses	Összetett útvonal létrehozása az ellipszisekből
 	Fill Grid	Rács kitöltése
+	Select two or more objects, or a group	Jelöljön ki két vagy több objektumot, vagy egy csoportot
+# 3D and Materials › Extrude & Bevel, Inflate and Rotate: options, Position presets and bevel shapes.
+	Back	Hátulról
+	Both sides	Mindkét oldal
+	Classic	Klasszikus
+	Cove	Homorú
+	Depth	Mélység
+	Front	Elölről
+	Isometric Bottom	Izometrikus alsó
+	Isometric Left	Izometrikus bal
+	Isometric Right	Izometrikus jobb
+	Isometric Top	Izometrikus felső
+	Off-Axis Back	Ferdén hátulról
+	Off-Axis Bottom	Ferdén alulról
+	Off-Axis Front	Ferdén elölről
+	Off-Axis Left	Ferdén balról
+	Off-Axis Right	Ferdén jobbról
+	Off-Axis Top	Ferdén felülről
+	Ogee	S-ív
+	Reset all 3D settings to their defaults.	Az összes 3D-beállítás visszaállítása az alapértékekre.
+	Step	Lépcső
+	Taper	Elvékonyodás
+	Twist	Csavarás
+	Volume	Térfogat
+3d	Cap	Zárólap
+3d	Solid	Tömör
+3d	Hollow	Üreges
+3d	Bevel	Élletörés
+3d	Rounded	Lekerekített
+3d	Space	Köz
+	Bevel Shape	Élletörés alakja
+	Bevel Inside	Élletörés befelé
+	Bevel both sides	Élletörés mindkét oldalon
+	Presets	Készletek
+@msg	An object takes one 3D effect. Edit the existing effect's options, or remove it first.	Egy objektumnak csak egy 3D effektusa lehet. Szerkessze a meglévő effektus beállításait, vagy előbb távolítsa el.
+@msg	{label} currently requires a path or compound path. Convert type, images and groups to paths first.	{label} egyelőre görbét vagy összetett görbét igényel. Előbb alakítsa görbévé a szöveget, a képeket és a csoportokat.
+@msg	{label} requires a shape with at least two anchors	{label} legalább két szerkesztőpontos alakzatot igényel
+@msg	The shape is too complex for a 3D effect	Az alakzat túl összetett a 3D effektushoz
+@msg	The 3D surface is too complex; simplify the shape	A 3D felület túl összetett; egyszerűsítse az alakzatot
+	Transform Objects	Objektumok transzformálása
+@msg	unknown parameter `{key}`; did you mean `{near}`?	ismeretlen paraméter: `{key}`; erre gondolt: `{near}`?
+@msg	unknown parameter `{key}`; the command takes no parameters	ismeretlen paraméter: `{key}`; a parancsnak nincs paramétere
+@msg	unknown parameter `{key}`; the command takes: {keys}	ismeretlen paraméter: `{key}`; a parancs ezeket fogadja el: {keys}
+	Load EPS into Clipboard	EPS betöltése a vágólapra
+@msg	an image of {w} × {h} pixels is too large to draw	egy {w} × {h} pixeles kép túl nagy a kirajzoláshoz

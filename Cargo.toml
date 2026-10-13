@@ -37,6 +37,7 @@ vectorcraft-eps = { path = "crates/eps" }
 vectorcraft-metafile = { path = "crates/metafile" }
 vectorcraft-plugins = { path = "crates/plugins" }
 vectorcraft-affinity = { path = "crates/affinity" }
+vectorcraft-scriptcheck = { path = "crates/scriptcheck" }
 
 # foundation
 kurbo = { version = "0.13", features = ["serde"] }
@@ -65,6 +66,7 @@ skrifa = "0.47"
 harfrust = "0.13"
 linesweeper = "0.5"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+rustix = { version = "1.1", default-features = false }
 # Zstandard decoder (pure Rust, builds for wasm32 too): the editing copy an EPS carries of its art.
 ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 jpeg-encoder = { version = "0.6", default-features = false, features = ["std"] }

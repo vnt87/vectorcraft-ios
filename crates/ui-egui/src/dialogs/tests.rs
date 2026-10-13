@@ -257,6 +257,31 @@ fn revolve_dialog_preview_cancel_confirm_and_undo() {
 }
 
 #[test]
+fn extrude_inflate_and_rotate_dialogs_preview_confirm_and_undo() {
+    for effect in vectorcraft_effects::SOLIDS {
+        let mut app = app();
+        app.run("path.create", json!({"d":"M100 100 L200 100 L200 200 L100 200 Z"})).unwrap();
+        app.run("select.all", json!({})).unwrap();
+        let before = app.session.doc().unwrap().doc.clone();
+        app.run("effect.dialog", json!({"effect": effect, "item": null})).unwrap();
+        frame(&mut app, Default::default());
+        assert!(app.session.in_interaction(), "{effect}: previewing");
+        cancel(&mut app);
+        assert_eq!(app.session.doc().unwrap().doc, before, "{effect}: Cancel restores");
+        app.run("effect.dialog", json!({"effect": effect, "item": null})).unwrap();
+        app.ui.dialog.as_mut().unwrap().fields.insert("rotationY".into(), json!(45));
+        frame(&mut app, Default::default());
+        confirm(&mut app).unwrap();
+        let doc = &app.session.doc().unwrap().doc;
+        let n = doc.node(doc.layers[0].children().unwrap()[0].id).unwrap();
+        assert_eq!(n.appearance.effects.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [effect]);
+        assert_eq!(n.appearance.effects[0].params["rotationY"], json!(45));
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc().unwrap().doc, before, "{effect}: one undo step");
+    }
+}
+
+#[test]
 fn dialogs_are_as_tall_as_their_content() {
     // The save prompt, shown after a taller dialog, is as tall as its text and buttons: no empty
     // band around the buttons, nothing inherited from the other dialog.
@@ -352,6 +377,42 @@ fn a_form_dialog_is_as_wide_as_its_fields_not_the_window() {
     // The same dialog in a narrow window still fits it.
     let narrow = dialog_rect(&mut app, 360.0);
     assert!(narrow.width() <= 360.0, "{:.0} wide in a 360-point window", narrow.width());
+}
+
+/// Object › Path › Split Into Grid opens on a grid the size of the selection, shows its rows and
+/// columns side by side (number, size, gutter, total), previews on the canvas and, on OK, splits
+/// the path and adds the guides as one undo step.
+#[test]
+fn split_into_grid_opens_at_the_selections_size_and_previews() {
+    let mut app = app();
+    app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 112, "height": 62})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    let undo = app.session.doc().unwrap().history.undo.len();
+    crate::menus::invoke(&mut app, "object.path.splitIntoGrid", json!({}));
+    let d = app.ui.dialog.as_mut().unwrap();
+    assert_eq!((d.f64("totalWidth", 0.0), d.f64("totalHeight", 0.0), d.bool("addGuides")), (112.0, 62.0, false));
+    d.fields.extend([
+        ("columns".to_string(), json!(3)),
+        ("columnGutter".to_string(), json!(8)),
+        ("addGuides".into(), json!(true)),
+        ("preview".into(), json!(true)),
+    ]);
+    frame(&mut app, Default::default());
+    // The preview: 2 × 3 cells and the guides along their edges, not yet an undo step.
+    assert_eq!((objects(&app), app.session.doc().unwrap().doc.guides.len()), (6, 10));
+    assert!(app.session.in_interaction());
+    confirm(&mut app).unwrap();
+    let st = app.session.doc().unwrap();
+    assert_eq!((objects(&app), st.doc.guides.len(), st.history.undo.len()), (6, 10, undo + 1));
+    assert!(app.ui.dialog.is_none() && !app.session.in_interaction());
+    // Cancel rolls a preview back.
+    app.run("select.all", json!({})).unwrap();
+    crate::menus::invoke(&mut app, "object.path.splitIntoGrid", json!({}));
+    app.ui.dialog.as_mut().unwrap().fields.insert("preview".into(), json!(true));
+    frame(&mut app, Default::default());
+    assert_eq!(objects(&app), 4, "one grid over the six cells");
+    cancel(&mut app);
+    assert_eq!(objects(&app), 6);
 }
 
 #[test]

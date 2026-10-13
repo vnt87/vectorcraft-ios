@@ -241,6 +241,7 @@
 	Author Title:	Посада автора:
 	Author:	Автор:
 	Auto	Авто
+	Auto Color	Автоколір
 	Automatic	Автоматично
 	Auto Size New Area Type	Автоматично підганяти розмір нового тексту в області
 	Auto Spell Check	Автоматична перевірка орфографії
@@ -362,6 +363,59 @@
 	Character Style Options	Параметри стилю символу
 	Character Styles	Стилі символів
 	Check Links	Перевірити зв’язки
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	Перевірити сценарій
+	Check Script…	Перевірити сценарій…
+	Copy Report	Копіювати звіт
+	VectorCraft read this script without running it.	VectorCraft прочитав цей сценарій, не запускаючи його.
+	Needs nothing beyond plain JavaScript	Потрібен лише звичайний JavaScript
+	Needs the script language's own objects or directives	Потрібні власні об’єкти або директиви мови сценаріїв
+	Needs the document model	Потрібна модель документа
+	Needs files	Потрібні файли
+	Needs menu commands	Потрібні команди меню
+	Needs dialogs	Потрібні діалогові вікна
+	Needs features only the reference app has	Потрібні функції, які має лише еталонна програма
+	Outside the document	Поза документом
+	Writes, moves or deletes files	Записує, переміщує або видаляє файли
+	Opens files in other apps	Відкриває файли в інших програмах
+	Opens network connections	Відкриває мережеві з’єднання
+	Loads native code	Завантажує нативний код
+	Sends messages to other apps	Надсилає повідомлення іншим програмам
+	Reads or sets environment variables	Читає або задає змінні середовища
+	Runs code the checker can't read	Виконує код, який перевірка не може прочитати
+	Changes the reference app's preferences	Змінює налаштування еталонної програми
+	Menu commands	Команди меню
+	Names the script builds as it runs: {count}	Імена, які сценарій складає під час виконання: {count}
+	Document model	Модель документа
+	Object types: {names}	Типи об’єктів: {names}
+	Directives	Директиви
+	Includes	Підключені файли
+	Checked	Перевірено
+	Not followed: outside the script's folder	Пропущено: поза папкою сценарію
+	Includes itself	Підключає сам себе
+	Not read	Не прочитано
+	Not read: a limit was reached	Не прочитано: досягнуто межі
+	Compiled or not text	Скомпільований або не текст
+	Problems	Проблеми
+	String not closed	Рядок не закрито
+	Comment not closed	Коментар не закрито
+	Regular expression not closed	Регулярний вираз не закрито
+	Template literal not closed	Шаблонний рядок не закрито
+	XML literal not closed	XML-літерал не закрито
+	Bracket never closed	Дужку не закрито
+	Closing bracket with no opening one	Закривна дужка без відкривної
+	Syntax newer than ES3	Синтаксис, новіший за ES3
+	Unknown directive	Невідома директива
+	Not valid UTF-8: unreadable bytes were replaced	Недійсний UTF-8: нечитабельні байти замінено
+	Mixed line endings	Змішані кінці рядків
+	Nesting too deep to follow	Надто глибока вкладеність
+	line {line}	рядок {line}
+	lines {lines}	рядки {lines}
+	{file}, line {line}	{file}, рядок {line}
+	Compiled script: ask its author for the .jsx file	Скомпільований сценарій: попросіть в автора файл .jsx
+	Too large to check	Завеликий для перевірки
+	Not a script for the reference app	Це не сценарій для еталонної програми
+	Some lists were cut short at their limit.	Деякі списки обрізано на межі.
 	Check Spelling…	Перевірити орфографію…
 	Choose a folder	Виберіть папку
 	Choose…	Вибрати…
@@ -1136,6 +1190,8 @@
 	Graphic Style Library	Бібліотека графічних стилів
 	Graphic Style Options	Параметри графічного стилю
 	Graphic Style Options…	Параметри графічного стилю…
+	Symbol Options	Параметри символу
+	Symbol Options…	Параметри символу…
 	Graphic Styles	Графічні стилі
 	Graphic Styles Options	Параметри графічних стилів
 	Graphics	Графіка
@@ -1236,6 +1292,8 @@
 	Identify Objects By	Визначати об’єкти по
 	Ignore	Ігнорувати
 	Ignore Artboards (all the art as one page)	Ігнорувати монтажні області (весь малюнок як одна сторінка)
+	Auto Grouping	Автогрупування
+	Ignore Color	Ігнорувати колір
 	Ignore White	Ігнорувати білий
 	Palette:	Палітра:
 	Limited	Обмежена
@@ -2730,6 +2788,8 @@ effect	Points	Точки
 	Spiral Tool	Інструмент «Спіраль»
 	Split Freeform Line	Розділити довільну лінію
 	Split Into Grid	Розділити на сітку
+	Total:	Усього:
+	Add Guides	Додати напрямні
 	Split Into Grid…	Розділити на сітку…
 	Split Path	Розділити контур
 	spot	плашковий
@@ -3223,6 +3283,7 @@ effect	Points	Точки
 	{warning}: click to correct to the closest color ({hex})	{warning}: натисніть , щоб виправити найближчий колір ({hex})
 	“{file}” is protected by a password.	"{file}" захищений паролем.
 	● Recording	● Запис
+imageTrace	Outline	Контур
 @plural	{n} item|{n} items	{n} елемент|{n} елементи|{n} елементів
 @plural	Color Table ({n} color)|Color Table ({n} colors)	Таблиця кольорів ({n} колір)|Таблиця кольорів ({n} кольори)|Таблиця кольорів ({n} кольорів)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	Видалити цей графічний стиль ({n})?|Видалити ці графічні стилі ({n})?|Видалити ці графічні стилі ({n})?
@@ -3378,6 +3439,7 @@ axis	Both	Обидві
 @msg	Convert to Artboards: selection has no area	Перетворення на монтажні області: виділення не має області
 @msg	Convert to Shape: no rectangles or ellipses selected	Перетворення на фігуру: не виділено прямокутники або еліпси
 @msg	Copied the CSS of {rules} object(s)	Скопійовано CSS об’єктів: {rules}
+@msg	Copied the script report	Звіт про сценарій скопійовано
 @msg	Corners edits the corners of a path	«Кути» редагує кути контуру
 @msg	Couldn't copy to the system clipboard: {e}	Не вдалося скопіювати до системного буфера обміну: {e}
 @msg	Couldn't open {name}: {e}	Не вдалося відкрити {name}: {e}
@@ -3413,6 +3475,7 @@ axis	Both	Обидві
 @msg	No saved selections (Select → Save Selection…)	Немає збережених виділень (Виділення → Зберегти виділення…)
 @msg	No saved views (View → New View…)	Немає збережених видів (Перегляд → Новий вид…)
 @msg	Offset Path: select paths	Зміщення контуру: виділіть контури
+@msg	Offset Path: the offset leaves nothing of the selected paths (an inset larger than the shapes)	Зміщення контуру: після зміщення від виділених контурів нічого не лишається (зміщення всередину більше за самі фігури)
 @msg	Opened with {_1} note(s): {_2}	Відкрито із примітками ({_1}) : {_2}
 @msg	Opened {url}	Відкрито {url}
 @msg	Outline Stroke: no stroked paths selected	Обведення контуру: не виділено контури з обведенням
@@ -3868,6 +3931,7 @@ axis	Both	Обидві
 @msg	{name}: no such recovery entry	{name}: такого запису відновлення немає
 @msg	{path} can't be found: relink it first	{path} не знайдено: спочатку відновіть зв’язок
 @msg	{path}: no file system here (pass dataBase64 to open; omit the path to get dataBase64)	{path}: тут немає файлової системи (передайте dataBase64 для відкриття; опустіть шлях, щоб отримати dataBase64)
+@msg	{path}: not a file	{path}: не файл
 @msg	{path}: {e}	{path}: {e}
 @msg	{status} ({e})	{status} ({e})
 @msg	Couldn't place {name}: {e}	Не вдалося помістити {name}: {e}
@@ -4182,3 +4246,48 @@ lighting	Light	Світло
 	Use Outside Rectangle As Frame	Використовувати зовнішній прямокутник як рамку
 	Create Compound Path From Ellipses	Створити складений контур з еліпсів
 	Fill Grid	Залити сітку
+	Select two or more objects, or a group	Виділіть два або більше об’єктів чи групу
+# 3D and Materials › Extrude & Bevel, Inflate and Rotate: options, Position presets and bevel shapes.
+	Back	Ззаду
+	Both sides	З обох боків
+	Classic	Класичний
+	Cove	Викружка
+	Depth	Глибина
+	Front	Спереду
+	Isometric Bottom	Ізометрія знизу
+	Isometric Left	Ізометрія ліворуч
+	Isometric Right	Ізометрія праворуч
+	Isometric Top	Ізометрія згори
+	Off-Axis Back	Під кутом ззаду
+	Off-Axis Bottom	Під кутом знизу
+	Off-Axis Front	Під кутом спереду
+	Off-Axis Left	Під кутом ліворуч
+	Off-Axis Right	Під кутом праворуч
+	Off-Axis Top	Під кутом згори
+	Ogee	Гусик
+	Reset all 3D settings to their defaults.	Скинути всі параметри 3D до типових значень.
+	Step	Сходинка
+	Taper	Звуження
+	Twist	Закручування
+	Volume	Об'єм
+3d	Cap	Торці
+3d	Solid	Суцільний
+3d	Hollow	Порожнистий
+3d	Bevel	Фаска
+3d	Rounded	Заокруглений
+3d	Space	Інтервал
+	Bevel Shape	Форма фаски
+	Bevel Inside	Фаска всередину
+	Bevel both sides	Фаска з обох боків
+	Presets	Набори
+@msg	An object takes one 3D effect. Edit the existing effect's options, or remove it first.	Об'єкт може мати лише один 3D-ефект. Змініть параметри наявного ефекту або спершу вилучіть його.
+@msg	{label} currently requires a path or compound path. Convert type, images and groups to paths first.	{label}: поки що потрібен контур або складений контур. Спершу перетворіть текст, зображення та групи на контури.
+@msg	{label} requires a shape with at least two anchors	{label}: потрібна фігура щонайменше з двома опорними точками
+@msg	The shape is too complex for a 3D effect	Фігура надто складна для 3D-ефекту
+@msg	The 3D surface is too complex; simplify the shape	3D-поверхня надто складна; спростіть фігуру
+	Transform Objects	Трансформувати об’єкти
+@msg	unknown parameter `{key}`; did you mean `{near}`?	невідомий параметр `{key}`; можливо, ви мали на увазі `{near}`?
+@msg	unknown parameter `{key}`; the command takes no parameters	невідомий параметр `{key}`; команда не має параметрів
+@msg	unknown parameter `{key}`; the command takes: {keys}	невідомий параметр `{key}`; команда приймає: {keys}
+	Load EPS into Clipboard	Завантажити EPS у буфер обміну
+@msg	an image of {w} × {h} pixels is too large to draw	зображення розміром {w} × {h} пікселів завелике для відображення

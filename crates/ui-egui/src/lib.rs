@@ -132,6 +132,8 @@ mod tests_saveext;
 #[cfg(test)]
 mod tests_screenmode;
 #[cfg(test)]
+mod tests_script_check;
+#[cfg(test)]
 mod tests_scrub;
 #[cfg(test)]
 mod tests_selectall;
@@ -328,6 +330,8 @@ pub struct CacheKey {
     /// Appearance of Black › On Screen › Display All Blacks as Rich Black
     /// ([`vectorcraft_render::RenderOptions::rich_black`]).
     pub rich_black: bool,
+    /// Colour and style of guide paths ([`vectorcraft_render::RenderOptions::guide`]).
+    pub guide: ([u8; 3], bool),
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -628,6 +632,11 @@ impl VectorcraftApp {
     /// [`Self::run`] it, inside what asks for file dialogs.
     fn run_now(&mut self, id: &str, params: Value) -> Result<Value, String> {
         self.run_count = self.run_count.wrapping_add(1);
+        // In debug builds the app's own calls are held to the params descriptions too (#1442): a
+        // panel passing a key its command doesn't read shows up in the tests.
+        if cfg!(debug_assertions) {
+            menus::check_params(&self.session, id, &params)?;
+        }
         if let Some(r) = menus::run_ui_command(self, id, &params) {
             return r;
         }

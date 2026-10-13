@@ -671,6 +671,108 @@ fn image_trace_make_places_paths_over_the_image() {
     assert_eq!(paths[0].appearance.fill_paint(), Paint::solid(Color::rgb8(0, 0, 0)));
 }
 
+/// Shapes: the disc of the test image comes out as a live ellipse where the image lies, the same
+/// circle as its traced path; without the option it is a plain path.
+#[test]
+fn image_trace_shapes_makes_live_shapes() {
+    let mut s = session();
+    image_doc(&mut s);
+    let r = s.execute("imageTrace.make", &json!({"params": {"ignoreWhite": true, "shapes": true}})).unwrap();
+    let n = node(&s, NodeId(r["id"].as_u64().unwrap()));
+    let paths = traced_paths(&n);
+    assert_eq!(paths.len(), 1);
+    let NodeKind::Path { path, live: Some(live), .. } = &paths[0].kind else { panic!("not a live shape: {:?}", paths[0].kind) };
+    let vectorcraft_doc::LiveShape::Ellipse { w, h, .. } = **live else { panic!("{live:?}") };
+    // A circle of r = 30 px, drawn twice the size.
+    assert!(w == h && (w - 60.0).abs() < 0.75, "{w} × {h}");
+    let bb = path.bounds().unwrap();
+    assert!((bb.center().x - 150.0).abs() < 1.5 && (bb.center().y - 150.0).abs() < 1.5 && (bb.width() - 120.0).abs() < 1.5, "{bb:?}");
+    assert_eq!(*path, live.to_path());
+    assert_eq!(paths[0].appearance.fill_paint(), Paint::solid(Color::rgb8(0, 0, 0)));
+    // Off, as documents saved before have it: a path.
+    let mut s = session();
+    image_doc(&mut s);
+    let r = s.execute("imageTrace.make", &json!({"params": {"ignoreWhite": true}})).unwrap();
+    let n = node(&s, NodeId(r["id"].as_u64().unwrap()));
+    assert!(matches!(traced_paths(&n)[0].kind, NodeKind::Path { live: None, .. }));
+}
+
+/// Auto Grouping: a ring and the dot in its hole are a group (the ring first), the square beside
+/// them is not in it; the picture is the same as without, and the group traces again, expands
+/// and releases as any other.
+#[test]
+fn image_trace_auto_grouping_groups_what_is_inside() {
+    let art = vectorcraft_trace::Raster::from_fn(120, 80, |x, y| {
+        let d = (x as f64 + 0.5 - 40.0).hypot(y as f64 + 0.5 - 40.0);
+        if d <= 6.0 || (90..110).contains(&x) && (30..50).contains(&y) {
+            [200, 0, 0, 255]
+        } else if (16.0..=30.0).contains(&d) {
+            [0, 0, 160, 255]
+        } else {
+            [255, 255, 255, 255]
+        }
+    });
+    let make = |grouping: bool| {
+        let mut s = session();
+        add_image(&mut s, &art, Affine::IDENTITY);
+        let r = s.execute("imageTrace.make", &json!({"preset": "6 Colors", "params": {"ignoreWhite": true, "autoGrouping": grouping}})).unwrap();
+        assert_eq!(r["paths"], 3);
+        let g = NodeId(r["id"].as_u64().unwrap());
+        (s, g)
+    };
+    let (mut s, g) = make(true);
+    let items = traced_paths(&node(&s, g));
+    assert_eq!(items.len(), 2);
+    let group = items.iter().find(|n| matches!(n.kind, NodeKind::Group { .. })).expect("a group");
+    let inside = group.children().unwrap();
+    assert_eq!(inside.len(), 2);
+    assert_eq!(inside[0].appearance.fill_paint(), Paint::solid(Color::rgb8(0, 0, 160)));
+    assert_eq!(inside[1].appearance.fill_paint(), Paint::solid(Color::rgb8(200, 0, 0)));
+    assert!(matches!(items.iter().find(|n| n.id != group.id).unwrap().kind, NodeKind::Path { .. }));
+    // The same picture as without.
+    let (flat, fg) = make(false);
+    assert_eq!(traced_paths(&node(&flat, fg)).len(), 3);
+    let shot = |s: &Session| {
+        let img = render_doc(s, true);
+        (0..120).flat_map(|x| (0..80).map(move |y| (x, y))).map(|(x, y)| img.pixel(x, y)).collect::<Vec<_>>()
+    };
+    assert_eq!(shot(&s), shot(&flat));
+    // Traced again without the option, it is flat again; expanded, the groups stay.
+    let r = s.execute("imageTrace.make", &json!({"preset": "6 Colors", "params": {"ignoreWhite": true}})).unwrap();
+    assert_eq!(traced_paths(&node(&s, NodeId(r["id"].as_u64().unwrap()))).len(), 3);
+    s.execute("imageTrace.make", &json!({"preset": "6 Colors", "params": {"ignoreWhite": true, "autoGrouping": true}})).unwrap();
+    let r = s.execute("imageTrace.expand", &json!({})).unwrap();
+    let expanded = node(&s, NodeId(r["ids"][0].as_u64().unwrap()));
+    assert_eq!(expanded.children().unwrap().len(), 2);
+}
+
+/// Gradients: an image that is one linear gradient is one path filled with it, the gradient's line
+/// where the image lies; without the option it is bands of flat colour, as saved documents have it.
+#[test]
+fn image_trace_gradients_fills_with_a_gradient() {
+    let art = vectorcraft_trace::Raster::from_fn(100, 60, |x, _| {
+        let t = (f64::from(x) + 0.5) / 100.0;
+        [(20.0 + 200.0 * t) as u8, 40, (220.0 - 180.0 * t) as u8, 255]
+    });
+    let make = |gradients: bool| {
+        let mut s = session();
+        add_image(&mut s, &art, Affine::translate((50.0, 50.0)) * Affine::scale(2.0));
+        let r = s.execute("imageTrace.make", &json!({"preset": "6 Colors", "params": {"gradients": gradients}})).unwrap();
+        traced_paths(&node(&s, NodeId(r["id"].as_u64().unwrap())))
+    };
+    let paths = make(true);
+    assert_eq!(paths.len(), 1);
+    let Paint::Gradient(g) = paths[0].appearance.fill_paint() else { panic!("{:?}", paths[0].appearance.fill_paint()) };
+    assert_eq!(g.gradient.kind, vectorcraft_color::GradientKind::Linear);
+    assert_eq!(g.gradient.stops.len(), 2);
+    // Level, from the image's left edge (x = 50) to its right one (x = 250), at any height.
+    let geom = g.geom.as_ref().unwrap();
+    let (a, b) = if geom.start.x < geom.end.x { (geom.start, geom.end) } else { (geom.end, geom.start) };
+    assert!((a.x - 50.0).abs() < 3.0 && (b.x - 250.0).abs() < 3.0 && (a.y - b.y).abs() < 2.0, "{geom:?}");
+    let flat = make(false);
+    assert!(flat.len() > 1 && flat.iter().all(|n| matches!(n.appearance.fill_paint(), Paint::Solid { .. })));
+}
+
 #[test]
 fn image_trace_release_and_expand() {
     let mut s = session();
@@ -795,7 +897,8 @@ fn image_trace_presets_query_and_errors() {
     let mut s = session();
     let r = s.execute("imageTrace.presets", &json!({})).unwrap();
     let names: Vec<&str> = r["presets"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 13);
+    assert_eq!(names.len(), 15);
+    assert!(names.contains(&"Auto Color") && names.contains(&"Outline"));
     assert!(names.contains(&"Technical Drawing") && names.contains(&"Shades of Gray") && names.contains(&"Flat Logo"));
     let a = rect(&mut s, 0.0, 0.0, 10.0, 10.0);
     assert!(s.execute("imageTrace.make", &json!({"id": a.0})).is_err(), "not an image");

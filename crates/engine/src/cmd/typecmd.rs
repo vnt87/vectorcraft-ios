@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Text",
             [],
             None,
-            "{id?|ids?, text} replace the contents of text objects (keeps the first run's style)",
+            "{id?|ids?, text} replace the contents of text objects (keeps the first run's style) → {ids, overflow?: [id…] (area type and type on a path whose text no longer fits; left out when all fits)}",
             has_doc,
             set_text
         ),
@@ -48,7 +48,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Area Type Options…",
             ["Type"],
             None,
-            "{ids?, width?: pt, height?: pt, rows?, columns?, gutter?: pt, inset?: pt, firstBaseline?: ascent|capHeight|xHeight|leading|fixed, firstBaselineMin?: pt, verticalAlign?: top|center|bottom|justify, fit?: none|autoHeight|shrinkText, fitMinPercent?: 10..100} set the selected area type's options; width and height size the type area from its top-left corner, along the type's own axes, and the text reflows at its size (with fit autoHeight, Auto Size, the frame's height follows the text after every edit and height is ignored; setting the height by hand turns it off); fit shrinkText scales overflowing text down (size, leading, baseline shift) by the largest factor down to fitMinPercent % (default 50) that makes it fit (none given: query) → the first object's options, plus overflow (the text doesn't fit its frame) and fitScale (Shrink Text's factor, 1 unshrunk)",
+            "{ids?|id?, width?: pt, height?: pt, rows?, columns?, gutter?: pt, inset?: pt, firstBaseline?: ascent|capHeight|xHeight|leading|fixed, firstBaselineMin?: pt, verticalAlign?: top|center|bottom|justify, fit?: none|autoHeight|shrinkText, fitMinPercent?: 10..100, …the keys of its own reply (it can be passed back; the values it only reports are ignored)} set the selected area type's options; width and height size the type area from its top-left corner, along the type's own axes, and the text reflows at its size (with fit autoHeight, Auto Size, the frame's height follows the text after every edit and height is ignored; setting the height by hand turns it off); fit shrinkText scales overflowing text down (size, leading, baseline shift) by the largest factor down to fitMinPercent % (default 50) that makes it fit (none given: query) → the first object's options, plus overflow (the text doesn't fit its frame) and fitScale (Shrink Text's factor, 1 unshrunk)",
             has_selection,
             area_options
         ),
@@ -66,7 +66,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Fit Headline",
             ["Type"],
             None,
-            "{ids?} track the first line of area type so it fills the frame width → {tracking}",
+            "{ids?|id?} track the first line of area type so it fills the frame width → {tracking}",
             has_selection,
             fit_headline
         ),
@@ -75,7 +75,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Character",
             [],
             None,
-            "{ids?|id?, font?, style?, size?: pt, leading?: pt|\"auto\", tracking?: 1/1000 em, justify?: \"auto\" (the start of each paragraph's direction)|\"left\"|\"center\"|\"right\"|\"justifyAll\", fill?: colour, features?: [\"dlig\", \"-liga\", …] OpenType, start?: byte, end?: byte} (size/leading are document points after object scaling; with a range: the character attributes style that range and justify the paragraphs it touches; without: all the text)",
+            "{ids?|id?, font?, style?, size?: pt, leading?: pt|\"auto\", tracking?: 1/1000 em, justify?: \"auto\" (the start of each paragraph's direction)|\"left\"|\"center\"|\"right\"|\"justifyAll\", fill?: colour, features?: [\"dlig\", \"-liga\", …] OpenType, start?: byte, end?: byte} (size/leading are document points after object scaling; with a range: the character attributes style that range and justify the paragraphs it touches; without: all the text) → {ids, overflow?: [id…] (area type and type on a path whose text no longer fits; left out when all fits)}",
             has_doc,
             set_style
         ),
@@ -201,6 +201,22 @@ pub(crate) fn refresh_bounds_of(d: &mut Document, ids: &[NodeId]) {
             refresh_bounds(t);
         }
     }
+}
+
+/// `result` with `overflow: [id…]`: the area type and type on a path among `ids` whose text
+/// doesn't fit (the red overflow "+"; its lines past the frame aren't drawn). Left out when all of
+/// it fits. The commands that make type or change what it holds answer with it, so the call that
+/// pushed text out of its frame says so itself.
+pub(crate) fn with_overflow(s: &Session, ids: &[NodeId], mut result: Value) -> Value {
+    let Ok(st) = s.doc() else { return result };
+    let db = vectorcraft_text::FontDb::global();
+    let fits = |t: &TextObject| matches!(t.kind, vectorcraft_doc::TextKind::Point) || !vectorcraft_text::layout(db, t).overflow;
+    let over = |id: &&NodeId| matches!(st.doc.node(**id).map(|n| &n.kind), Some(NodeKind::Text(t)) if !fits(t));
+    let over: Vec<u64> = ids.iter().filter(over).map(|i| i.0).collect();
+    if !over.is_empty() {
+        result["overflow"] = json!(over);
+    }
+    result
 }
 
 /// Text objects among `ids` and their descendants.
@@ -373,7 +389,7 @@ fn set_text(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
-    Ok(json!({ "ids": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+    Ok(with_overflow(s, &ids, json!({ "ids": ids.iter().map(|i| i.0).collect::<Vec<_>>() })))
 }
 
 fn justify_param(v: &str) -> Option<Justify> {
@@ -501,7 +517,7 @@ fn set_style(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
-    Ok(json!({ "ids": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+    Ok(with_overflow(s, &ids, json!({ "ids": ids.iter().map(|i| i.0).collect::<Vec<_>>() })))
 }
 
 /// Reshape area type's frame with `f` ([`TextObject::transform_area`],
@@ -1022,6 +1038,7 @@ mod area_tests {
 }
 
 /// Width of the first line and of the space it can fill, with `tracking` on the first paragraph.
+/// The third value is where the first line ends in the plain text.
 fn headline_fit(t: &TextObject, tracking: f64) -> Option<(f64, f64, usize)> {
     let mut probe = t.clone();
     let para_end = probe.plain_text().find('\n').unwrap_or(usize::MAX);
@@ -1031,7 +1048,7 @@ fn headline_fit(t: &TextObject, tracking: f64) -> Option<(f64, f64, usize)> {
     let line = lay.lines.first()?;
     let para = t.para_at(0);
     let avail = cell.width() - 2.0 * t.area.inset - para.left_indent - para.right_indent;
-    Some((line.x1 - line.x0, avail, lay.lines.iter().filter(|l| l.start < para_end).count()))
+    Some((line.x1 - line.x0, avail, line.end))
 }
 
 fn fit_headline(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1044,8 +1061,11 @@ fn fit_headline(s: &mut Session, p: &Value) -> Result<Value> {
         if !matches!(t.kind, vectorcraft_doc::TextKind::Area { .. }) {
             continue;
         }
-        // Largest tracking that keeps the first paragraph on one line (bisection).
-        let one_line = |tr: f64| headline_fit(t, tr).is_some_and(|(_, _, lines)| lines == 1);
+        // Largest tracking that keeps the first paragraph on one line (bisection). The layout
+        // drops lines that overflow the frame, so a frame one line tall hides the wrapped rest:
+        // "one line" means the first line reaches the end of the first paragraph.
+        let para_end = t.plain_text().find('\n').unwrap_or(t.plain_text().len());
+        let one_line = |tr: f64| headline_fit(t, tr).is_some_and(|(_, _, end)| end >= para_end);
         let (mut lo, mut hi) = (-200.0, 2000.0);
         if !one_line(lo) {
             continue;
@@ -1087,9 +1107,27 @@ mod headline_tests {
         let tr = s.execute("text.fitHeadline", &json!({})).unwrap()["tracking"].as_f64().unwrap();
         assert!(tr > 100.0, "a short word spreads out: {tr}");
         let NodeKind::Text(t) = &s.doc().unwrap().doc.node(NodeId(id)).unwrap().kind else { panic!() };
-        let (w, avail, lines) = headline_fit(t, tr).unwrap();
-        assert_eq!(lines, 1);
+        let (w, avail, end) = headline_fit(t, tr).unwrap();
+        assert_eq!(end, 8);
         assert!(avail - w < 30.0, "{w} of {avail}");
         assert_eq!(t.runs.last().unwrap().style.tracking, 0.0, "the body keeps its tracking");
+    }
+
+    #[test]
+    fn fit_headline_fills_even_when_the_frame_holds_one_line() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"width": 400, "height": 400})).unwrap();
+        let id = s
+            .execute("text.create", &json!({"x": 10, "y": 10, "text": "NEON DRIVE", "size": 36, "area": {"width": 240, "height": 50}}))
+            .unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        s.execute("select.set", &json!({"ids": [id]})).unwrap();
+        let tr = s.execute("text.fitHeadline", &json!({})).unwrap()["tracking"].as_f64().unwrap();
+        assert!(tr < 1500.0, "a frame one line tall must not push the tracking to the ceiling: {tr}");
+        let NodeKind::Text(t) = &s.doc().unwrap().doc.node(NodeId(id)).unwrap().kind else { panic!() };
+        let (w, avail, end) = headline_fit(t, tr).unwrap();
+        assert_eq!(end, 10);
+        assert!(avail - w < 5.0, "{w} of {avail}");
     }
 }

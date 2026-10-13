@@ -192,7 +192,7 @@ pub fn load_with(name: &str, bytes: &[u8], opts: &LoadOptions) -> Result<Loaded>
     let title = file_name(name);
     let mut converted = false;
     let mut preview_only = false;
-    let (mut doc, warnings, restored) = match format.id {
+    let (mut doc, mut warnings, restored) = match format.id {
         // EPS and PostScript .ai: the document our EPS files carry, else the PostScript read.
         _ if format.id == "eps" || vectorcraft_pdf::is_postscript(bytes) => {
             let editing = vectorcraft_eps::has_native(bytes).then_some((true, || vectorcraft_eps::native(bytes)));
@@ -263,6 +263,7 @@ pub fn load_with(name: &str, bytes: &[u8], opts: &LoadOptions) -> Result<Loaded>
     if !matches!(format.id, "vectorcraft" | "template") || doc.title.is_empty() {
         doc.title = title;
     }
+    warnings.extend(doc.images.values().filter_map(|b| too_large_note(&b.bytes)));
     Ok(Loaded { doc, format, warnings, restored, converted, preview_only })
 }
 
@@ -381,23 +382,39 @@ pub(crate) fn source<'a>(p: &'a Value, cmd: &str) -> Result<Source<'a>> {
 
 pub(super) fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let src = source(p, "document.open")?;
-    open_bytes_with(s, src.name, &src.bytes, src.path.map(str::to_string), p)
+    // A relative path is the file in the working directory: its folder is where relative links
+    // are found (a bare file name has no folder of its own).
+    let path = src.path.map(super::absolute_path);
+    open_bytes_with(s, path.as_deref().unwrap_or(src.name), &src.bytes, path.clone(), p)
 }
 
 pub(super) fn new_from_template(s: &mut Session, p: &Value) -> Result<Value> {
     let src = source(p, "file.newFromTemplate")?;
-    open_template(s, src.name, &src.bytes, src.path)
+    let path = src.path.map(super::absolute_path);
+    open_template(s, path.as_deref().unwrap_or(src.name), &src.bytes, path.as_deref())
 }
 
 /// The most memory decoding one image may take: a 60 in print sheet at 300 ppi (18000 × 6600 px)
 /// is ~475 MB as RGBA, past the decoder's 512 MB default once it is converted. The web app keeps
 /// that default: wasm32 has 4 GB to address and aborts when an allocation fails.
-const MAX_RASTER_ALLOC: u64 = if cfg!(target_arch = "wasm32") { 512 << 20 } else { 2 << 30 };
+pub(crate) const MAX_RASTER_ALLOC: u64 = if cfg!(target_arch = "wasm32") { 512 << 20 } else { 2 << 30 };
+
+/// What to say of encoded image `bytes` that need more than [`MAX_RASTER_ALLOC`] to decode (its
+/// header says so; the pixels aren't read): the renderer, which has the same allowance, draws
+/// nothing for them, so Open, Place and the Links panel say it (#1479). `None` for images that
+/// decode, and for bytes that aren't an image.
+pub(crate) fn too_large_note(bytes: &[u8]) -> Option<String> {
+    use image::ImageDecoder as _;
+    let d = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_decoder().ok()?;
+    let (w, h) = d.dimensions();
+    (d.total_bytes() > MAX_RASTER_ALLOC).then(|| format!("an image of {w} × {h} pixels is too large to draw"))
+}
 
 /// Decode an image's header (and, for formats stored as PNG, its pixels). CMYK TIFFs are kept as
 /// they are, with their ink amounts ([`ImageBlob::cmyk`]); CMYK TIFFs with an alpha channel, which
 /// the decoder can't read, become RGBA in the active colour settings' CMYK, as do CMYK Photoshop
-/// documents, whose merged image is read ([`psdread`]).
+/// documents, whose merged image is read ([`psdread`]). Grayscale TIFFs with an alpha channel or
+/// other extra channels, which the decoder can't read either, become RGBA too.
 pub fn raster_image(bytes: &[u8]) -> Result<RasterImage> {
     let ppi = super::ppi::resolution(bytes);
     if psdread::is_psd(bytes) {
@@ -415,11 +432,11 @@ pub fn raster_image(bytes: &[u8]) -> Result<RasterImage> {
         let (width, height) = reader.into_dimensions().map_err(err)?;
         return stored(bytes.to_vec(), f.mime, (width, height), ppi);
     }
-    let cmyka = || {
+    let extra_samples = || {
         let cms = vectorcraft_color::cms::active();
-        vectorcraft_doc::cmyk::cmyka_tiff_rgba(bytes, |c| cms.cmyk_to_srgb(c, false))
+        vectorcraft_doc::cmyk::extra_samples_tiff_rgba(bytes, |c| cms.cmyk_to_srgb(c, false))
     };
-    let img = match (f.id == "tiff").then(cmyka).flatten() {
+    let img = match (f.id == "tiff").then(extra_samples).flatten() {
         Some(img) => img,
         None => reader.decode().map_err(err)?.to_rgba8(),
     };

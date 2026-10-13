@@ -2,9 +2,10 @@
 
 use serde_json::{Value, json};
 use vectorcraft_color::{Color, Paint};
-use vectorcraft_doc::{ColorMode, LiveShape, Node, NodeKind, TextKind};
-use vectorcraft_geom::Rect;
+use vectorcraft_doc::{Appearance, ColorMode, LiveShape, Node, NodeKind, TextKind};
+use vectorcraft_geom::{Rect, shapes};
 
+use super::tests_large_edits::{layer, run_soon, square, undo_gives_back};
 use super::*;
 
 fn session() -> Session {
@@ -135,6 +136,100 @@ fn hide_all_artwork_above_deselects_the_objects_it_hides() {
     assert_eq!((selected(&s), key(&s)), (vec![a], None));
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!((selected(&s), key(&s)), (vec![hidden, a, b], Some(a)));
+}
+
+/// Lock › All Artwork Above and Hide › All Artwork Above take each object that overlaps a selected
+/// object below it in the same layer, once, whether it is locked or hidden already or not. An object
+/// that overlaps only a selected object above it, the group around a selected object, the selected
+/// objects and an object that lies over a selected object of another layer stay as they are.
+#[test]
+fn lock_and_hide_all_artwork_above_take_what_overlaps_a_selected_object_below_in_its_layer() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 100.0, 100.0);
+    // `b` overlaps only `c`, which lies above it.
+    let b = rect(&mut s, 250.0, 0.0, 100.0, 100.0);
+    let c = rect(&mut s, 90.0, 0.0, 200.0, 100.0);
+    // `d` overlaps `a`, `e` overlaps `c`, `f` overlaps both, `g` overlaps neither, and `k` overlaps `a` and is locked.
+    let d = rect(&mut s, 20.0, 50.0, 30.0, 30.0);
+    let e = rect(&mut s, 200.0, 50.0, 30.0, 30.0);
+    let f = rect(&mut s, 60.0, 10.0, 50.0, 20.0);
+    let g = rect(&mut s, 500.0, 500.0, 20.0, 20.0);
+    let k = rect(&mut s, 10.0, 10.0, 10.0, 10.0);
+    s.execute("layer.setProps", &json!({"id": k.0, "locked": true})).unwrap();
+    // `m` is in a group, and `n` overlaps it.
+    let m = rect(&mut s, 800.0, 0.0, 50.0, 50.0);
+    sel(&mut s, &[m]);
+    let group = id_of(&s.execute("object.group", &json!({})).unwrap());
+    let n = rect(&mut s, 820.0, 20.0, 50.0, 50.0);
+    // In another layer, `h` lies where `a` lies, and `j` overlaps `i`.
+    s.execute("layer.new", &json!({})).unwrap();
+    let h = rect(&mut s, 0.0, 0.0, 100.0, 100.0);
+    let i = rect(&mut s, 600.0, 0.0, 100.0, 100.0);
+    let j = rect(&mut s, 650.0, 50.0, 100.0, 100.0);
+    let (taken, kept) = ([d, e, f, k, n, j], [a, b, c, g, group, m, h, i]);
+    for (cmd, lock) in [("object.lock.above", true), ("object.hide.above", false)] {
+        let done = |s: &Session, id: NodeId| if lock { node(s, id).locked } else { !node(s, id).visible };
+        sel(&mut s, &[a, c, m, i]);
+        let steps = undo_len(&s);
+        assert_eq!(s.execute(cmd, &json!({})).unwrap(), json!({"count": 6}), "{cmd}");
+        assert!(taken.iter().all(|id| done(&s, *id)), "{cmd}");
+        assert!(!kept.iter().any(|id| done(&s, *id)), "{cmd}");
+        assert_eq!((undo_len(&s), selected(&s)), (steps + 1, vec![a, c, m, i]), "{cmd}");
+        s.execute("edit.undo", &json!({})).unwrap();
+    }
+}
+
+/// A session with 1,000 tiles of 100 x 200 pt in rows of 40 under the 50,000 squares of [`square`],
+/// 50 on each tile, all of it selected; and the ids of the tiles and of the squares.
+fn tiles_under_squares() -> (Session, Vec<NodeId>, Vec<NodeId>) {
+    let tile = |t: usize| {
+        let (x, y) = ((t % 40) as f64 * 100.0, (t / 40) as f64 * 200.0);
+        Rect::new(x, y, x + 100.0, y + 200.0)
+    };
+    let s = super::tests_large_edits::session(51_000, |d, k| {
+        if k < 1000 { Node::path(d.alloc_id(), shapes::rectangle(tile(k)), Appearance::default_art()) } else { square(d, k - 1000) }
+    });
+    let mut tiles = layer(&s, 0);
+    let squares = tiles.split_off(1000);
+    (s, tiles, squares)
+}
+
+/// With 1,000 tiles selected under 50,000 squares, Lock › All Artwork Above locks every square in one
+/// undo step and Hide › All Artwork Above hides every square, each within 20 s, and the tiles stay
+/// selected.
+#[test]
+fn lock_and_hide_all_artwork_above_1000_tiles_under_50000_objects_finish_within_20_s() {
+    let (mut s, tiles, squares) = tiles_under_squares();
+    sel(&mut s, &tiles);
+    let before = s.doc().unwrap().doc.clone();
+    let (mut s, r) = run_soon(s, "object.lock.above", json!({}));
+    assert_eq!(r, json!({"count": 50_000}));
+    let d = &s.doc().unwrap().doc;
+    assert!(squares.iter().all(|id| d.node(*id).is_some_and(|n| n.locked)), "every square is locked");
+    assert!(tiles.iter().all(|id| d.node(*id).is_some_and(|n| !n.locked)), "no tile is locked");
+    assert!(selected(&s) == tiles, "the tiles stay selected");
+    undo_gives_back(&mut s, &before);
+    let (s, r) = run_soon(s, "object.hide.above", json!({}));
+    assert_eq!(r, json!({"count": 50_000}));
+    let d = &s.doc().unwrap().doc;
+    assert!(squares.iter().all(|id| d.node(*id).is_some_and(|n| !n.visible)), "every square is hidden");
+    assert!(tiles.iter().all(|id| d.node(*id).is_some_and(|n| n.visible)), "no tile is hidden");
+    assert!(selected(&s) == tiles, "the tiles stay selected");
+}
+
+/// With all 51,000 objects of [`tiles_under_squares`] selected, Lock › All Artwork Above and Hide ›
+/// All Artwork Above each find nothing to lock or hide within 20 s and record no undo step.
+#[test]
+fn lock_and_hide_all_artwork_above_with_51000_objects_selected_finish_within_20_s() {
+    let (s, tiles, squares) = tiles_under_squares();
+    let (steps, all) = (undo_len(&s), [tiles, squares].concat());
+    assert!(selected(&s) == all, "everything is selected");
+    let (s, r) = run_soon(s, "object.lock.above", json!({}));
+    assert_eq!(r, json!({"count": 0}));
+    let (s, r) = run_soon(s, "object.hide.above", json!({}));
+    assert_eq!(r, json!({"count": 0}));
+    assert_eq!(undo_len(&s), steps);
+    assert!(selected(&s) == all, "everything stays selected");
 }
 
 #[test]
@@ -1249,6 +1344,26 @@ fn ruler_guides_and_lock() {
     assert!(s.execute("guide.remove", &json!({"index": 0})).is_err());
 }
 
+/// #1534: Lock Guides locks the paths made into guides too: they can't be selected (so neither
+/// moved, reshaped nor deleted), by a click, a marquee or Select All, and locking lets them go.
+#[test]
+fn locked_guides_lock_guide_paths() {
+    let mut s = session();
+    let (a, b) = (rect(&mut s, 0.0, 0.0, 10.0, 10.0), rect(&mut s, 20.0, 20.0, 10.0, 10.0));
+    sel(&mut s, &[a]);
+    s.execute("view.guides.make", &json!({})).unwrap();
+    s.execute("view.guides.lock", &json!({"locked": true})).unwrap();
+    sel(&mut s, &[a, b]);
+    assert_eq!(selected(&s), vec![b]);
+    s.execute("select.all", &json!({})).unwrap();
+    assert_eq!(selected(&s), vec![b]);
+    s.execute("view.guides.lock", &json!({"locked": false})).unwrap();
+    sel(&mut s, &[a, b]);
+    assert_eq!(selected(&s), vec![a, b]);
+    s.execute("view.guides.lock", &json!({"locked": true})).unwrap();
+    assert_eq!(selected(&s), vec![b]);
+}
+
 fn guides(s: &Session) -> Vec<(bool, f64)> {
     s.doc().unwrap().doc.guides.iter().map(|g| (g.vertical, g.pos)).collect()
 }
@@ -1825,4 +1940,16 @@ fn crop_image_trim_cuts_to_the_opaque_pixels_as_they_are() {
     let r = s.execute("object.cropImage", &json!({"trim": true})).unwrap();
     assert_eq!((r["trimmed"].as_bool(), r["width"].as_u64()), (Some(false), Some(30)), "{r}");
     assert_eq!(bounds(&s, img), b);
+}
+
+#[test]
+fn crop_image_trim_leaves_a_cmyk_image_alone() {
+    // CMYK images keep their ink amounts and have no alpha: nothing to cut, and not an error.
+    let inks = vectorcraft_doc::cmyk::Inks::new(4, 2, [255, 0, 0, 0].repeat(8)).unwrap();
+    let tiff = vectorcraft_doc::ImageBlob::cmyk_tiff(&inks).unwrap();
+    let mut s = Session::new();
+    s.execute("document.open", &json!({"name": "inks.tif", "dataBase64": vectorcraft_format::base64_encode(&tiff.bytes)})).unwrap();
+    s.execute("select.all", &json!({})).unwrap();
+    let r = s.execute("object.cropImage", &json!({"trim": true})).unwrap();
+    assert_eq!((r["trimmed"].as_bool(), r["width"].as_u64(), r["height"].as_u64()), (Some(false), Some(4), Some(2)), "{r}");
 }

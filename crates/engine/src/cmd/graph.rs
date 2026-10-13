@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Data…",
             ["Object", "Graph"],
             None,
-            "{id?, series?, categories?, rows?, csv?: first row = series labels (first cell empty), then one row per category: label, values…; an empty cell or a null is a blank value, a quoted number a label, a `|` in a label a line break; transpose?: true swaps rows and columns (Transpose row/column), switchXY?: true swaps each scatter series' y and x columns (Switch x/y)} replace the graph's data; no data → the current {csv, series, categories, rows}",
+            "{id?, series?, categories?, rows?, csv?: first row = series labels (first cell empty); then one row per category: label; values…; an empty cell or a null is a blank value; a quoted number a label; a `|` in a label a line break, transpose?: true swaps rows and columns (Transpose row/column), switchXY?: true swaps each scatter series' y and x columns (Switch x/y)} replace the graph's data; no data → the current {csv, series, categories, rows}",
             has_selection,
             set_data
         ),
@@ -52,7 +52,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Design…",
             ["Object", "Graph"],
             None,
-            "{new?: name|true (New Design: the selected art becomes a graph design, named \"New Design\" when true; put a rectangle at the back to set the size it draws at), rename?: name, to?: new name (the graphs drawing it follow), paste?: name (Paste Design: a copy of the design's art into the document, selected, to edit and save again), delete?: name|[names] (graphs drawing them go back to their default marks)}; no params or selectUnused → {designs: [names], unused: [the names no graph draws with]}",
+            "{new?: name|true (New Design: the selected art becomes a graph design, named \"New Design\" when true; put a rectangle at the back to set the size it draws at), rename?: name, to?: new name (the graphs drawing it follow), paste?: name (Paste Design: a copy of the design's art into the document, selected, to edit and save again), delete?: name|[names] (graphs drawing them go back to their default marks), ids?|id?: object ids (default: the selection), selectUnused?: bool (Select Unused: just the list)}; no params or selectUnused → {designs: [names], unused: [the names no graph draws with]}",
             has_doc,
             design
         ),
@@ -146,7 +146,7 @@ fn to_csv(g: &GraphSpec) -> String {
             }
             out.push(',');
         }
-        out.push_str(&r.iter().map(|v| v.map(fmt_value).unwrap_or_default()).collect::<Vec<_>>().join(","));
+        out.push_str(&r.iter().map(|v| v.map(|v| v.to_string()).unwrap_or_default()).collect::<Vec<_>>().join(","));
         out.push('\n');
     }
     out
@@ -2336,6 +2336,15 @@ mod tests {
         assert!(s.is_empty() && c.is_empty());
         assert_eq!(r.len(), 2);
         assert_eq!(super::nice_axis(0.0, 7.0, 0), (0.0, 8.0, 2.0));
+    }
+
+    #[test]
+    fn numeric_csv_cells_round_trip_without_rounding_or_saturation() {
+        let mut g = GraphSpec::default();
+        g.set_cells(vec![vec![Some(1.2345), Some(-1.2345)], vec![Some(1e-6), Some(-1e-6)], vec![Some(1e20), Some(-1e20)], vec![Some(0.0), None]]);
+        let csv = super::to_csv(&g);
+        let (_, _, cells) = super::parse_csv(&csv);
+        assert_eq!(cells, g.cells(), "{csv}");
     }
 
     #[test]

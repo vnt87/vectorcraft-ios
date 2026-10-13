@@ -18,7 +18,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New…",
             ["File"],
             None,
-            "{preset?: a name from file.newPresets (start from it; the other params change it), name?|title?: document name (default Untitled-N), width?: pt=612|\"210 mm\", height?: pt=792, units?: \"Pixels\"|\"Points\"|\"Picas\"|\"Inches\"|\"Millimeters\"|\"Centimeters\"|\"Feet\"|\"Yards\"|\"Meters\"|\"Feet & Inches\" (default: prefs unitsGeneral, as print presets; screen presets: Pixels), orientation?: \"portrait\"|\"landscape\" (swaps width and height to match), artboards?: n (1–1000), artboardLayout?: {layout?: \"gridByRow\"|\"gridByColumn\"|\"row\"|\"column\", columns?: n (default: all in one row), spacing?: pt=20, rightToLeft?: bool}, bleed?: pt|[top, bottom, left, right]|{top?, …} (0–72 pt), backgroundContents?: \"transparent\"|\"white\" (a white artboard background, not an object), colorMode?: \"rgb\"|\"cmyk\" (a CMYK document starts with CMYK swatches and stores the colours applied to it as CMYK), rasterEffectsPpi?: 72|150|300 (1–2400), previewMode?: \"default\"|\"pixel\"|\"overprint\" (overprint turns Overprint Preview on, pixel Pixel Preview in the app; default leaves both), created?: Unix seconds|null (File Info's created date; default now, recorded in the journal so a replay matches)} → {index, previewMode}; the size is remembered in file.newPresets' Recent",
+            "{preset?: a name from file.newPresets (start from it; the other params change it), name?|title?: document name (default Untitled-N), width?: pt=612|\"210 mm\", height?: pt=792, units?: \"Pixels\"|\"Points\"|\"Picas\"|\"Inches\"|\"Millimeters\"|\"Centimeters\"|\"Feet\"|\"Yards\"|\"Meters\"|\"Feet & Inches\" (default: prefs unitsGeneral, as print presets; screen presets: Pixels), orientation?: \"portrait\"|\"landscape\" (swaps width and height to match), artboards?: n (1–1000), artboardLayout?: {layout?: \"gridByRow\"|\"gridByColumn\"|\"row\"|\"column\", columns?: n (default: all in one row), spacing?: pt=20, rightToLeft?: bool}, bleed?: pt|[top, bottom, left, right]|{top?, …} (0–72 pt), backgroundContents?: \"transparent\"|\"white\" (a white artboard background, not an object), colorMode?: \"rgb\"|\"cmyk\" (a CMYK document starts with CMYK swatches and stores the colours applied to it as CMYK), rasterEffectsPpi?: 72|150|300 (1–2400), previewMode?: \"default\"|\"pixel\"|\"overprint\" (overprint turns Overprint Preview on, pixel Pixel Preview in the app; default leaves both), created?: Unix seconds|null (File Info's created date; default now, recorded in the journal so a replay matches), size?: a preset's size label (a preset file.newPresets lists can be passed back; ignored)} → {index, previewMode}; the size is remembered in file.newPresets' Recent",
             always,
             super::newdoc::file_new
         ),
@@ -26,7 +26,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("document.activate", "Activate Document", [], None, "{index}", always, doc_activate),
         cmd!(query "document.inspect", "Inspect Document", [], None, "{depth?, childLimit?} → layer tree (each node: id, name, kind, visible, locked, bounds, opacity when below 1, blend when not Normal, fill, stroke and strokeWidth of objects and compound paths; a compound path's members have compoundMember: true instead of paint, which is the compound's), artboards, selection, history (a sliced tree reports childCount)", has_doc, |s, p| Ok(inspect::document_opts(s, slice_opts(p, "document.inspect")?))),
         cmd!(query "document.node", "Inspect Object", [], None, "{id, summary?: compact summary, depth?: child levels in the summary (default all), childLimit?: children shown per node (default all; a level that shows fewer reports childCount)} → one object", has_doc, doc_node),
-        cmd!(query "document.find", "Find Objects", [], None, "{name?: substring of the Layers panel name, kind?: panel label such as Group, Path, Type or Image (exact), text?: substring of type content, limit?: max matches (default 100, 0 counts only)} → {matches: [{id, name, kind, path}], total}", has_doc, doc_find),
+        cmd!(query "document.find", "Find Objects", [], None, "{name?: substring of the Layers panel name, kind?: panel label such as Group; Path; Type or Image (exact), text?: substring of type content, limit?: max matches (default 100, 0 counts only)} → {matches: [{id, name, kind, path}], total}", has_doc, doc_find),
         cmd!(query "document.json", "Document JSON", [], None, "{} → complete document model", has_doc, |s, _| Ok(serde_json::to_value(&*s.doc()?.doc).unwrap_or(Value::Null))),
         cmd!(
             "document.setUnits",
@@ -132,7 +132,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection_or_guides,
             clear
         ),
-        cmd!("edit.duplicate", "Duplicate", [], None, "{dx?, dy?} duplicate the selection in place (offset optional)", has_selection, duplicate),
+        cmd!(
+            "edit.duplicate",
+            "Duplicate",
+            ["Edit"],
+            None,
+            "{dx?, dy?} duplicate the selection in place (offset optional)",
+            has_selection,
+            duplicate
+        ),
     ]
 }
 
@@ -384,9 +392,7 @@ fn clear(s: &mut Session, p: &Value) -> Result<Value> {
         return ok();
     }
     s.edit("Clear", |d, sel| {
-        for id in &ids {
-            d.remove(*id)?;
-        }
+        d.remove_many(&ids)?;
         if with_guides {
             let gone = sel.guides.clone();
             d.retain_guides(sel, |i, _| !gone.contains(&i));
@@ -560,17 +566,45 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "ids": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
 }
 
-/// Duplicate `roots` directly above each original, transform the copies, select them.
+/// Duplicate `roots` directly above each original, transform the copies, select them
+/// ([`copy_above`]).
 pub(crate) fn duplicate_in(d: &mut Document, sel: &mut vectorcraft_doc::Selection, roots: &[NodeId], xf: Affine) -> Result<Vec<NodeId>> {
-    let mut out = vec![];
-    for id in roots {
-        let Some((par, idx, _)) = d.position(*id) else { continue };
-        let Some(n) = d.node(*id).cloned() else { continue };
-        let mut c = d.reid(&n);
-        c.transform(xf, true);
-        out.push(d.insert(par, idx + 1, c)?);
-    }
+    let out = copy_above(d, roots, |_, _, c| c.transform(xf, true))?;
     sel.set(out.iter().copied());
+    Ok(out)
+}
+
+/// Copy `roots` directly above each original and return the copies' ids. `change` gets the
+/// document, each original and its copy before the copy goes in, and must leave the document's
+/// tree as it is. The copies take new ids in the order of `roots`. Roots listed twice, or inside
+/// another root, are copied one at a time: each copy is made from the document as the copies
+/// before it left it.
+pub(crate) fn copy_above(d: &mut Document, roots: &[NodeId], mut change: impl FnMut(&mut Document, &Node, &mut Node)) -> Result<Vec<NodeId>> {
+    let paths = d.index_paths(roots.iter().copied());
+    let mut found: Vec<_> = roots.iter().filter_map(|id| paths.get(id)).collect();
+    found.sort_unstable();
+    let out = if found.windows(2).all(|w| !w[1].starts_with(w[0])) {
+        let mut copies = Vec::with_capacity(roots.len());
+        for id in roots {
+            let Some(n) = paths.get(id).and_then(|p| d.node_at(p)).cloned() else { continue };
+            let mut c = d.reid(&n);
+            change(d, &n, &mut c);
+            copies.push((*id, vec![c]));
+        }
+        let out: Vec<NodeId> = copies.iter().flat_map(|(_, c)| c.iter().map(|n| n.id)).collect();
+        d.insert_beside(copies, false)?;
+        out
+    } else {
+        let mut out = vec![];
+        for id in roots {
+            let Some((par, idx, _)) = d.position(*id) else { continue };
+            let Some(n) = d.node(*id).cloned() else { continue };
+            let mut c = d.reid(&n);
+            change(d, &n, &mut c);
+            out.push(d.insert(par, idx + 1, c)?);
+        }
+        out
+    };
     Ok(out)
 }
 

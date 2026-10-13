@@ -181,3 +181,79 @@ fn reflect_and_repeat_match_resvg() {
         assert_similar(&render_artboard(&d), &resvg_render(&svg(&body), 200, 120), 24.0, 0.01);
     }
 }
+
+/// #1557: `transform` as a CSS property, in CSS syntax, moves the object (and wins over the
+/// attribute, as in CSS), from a `style` attribute or a `<style>` rule.
+#[test]
+fn css_transforms_move_objects() {
+    let d = import_with(
+        &svg(r#"<style>.r { transform: rotate(90deg) }</style>
+            <rect id="a" x="0" y="0" width="50" height="50" fill="red" style="transform: translate(100px, 100px)"/>
+            <rect id="b" x="0" y="0" width="50" height="50" fill="blue" transform="translate(0 100)" style="transform: translateX(100px)"/>
+            <rect id="c" class="r" x="0" y="0" width="50" height="20" fill="green"/>"#),
+        &ImportOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let b: Vec<Rect> = art(&d).iter().map(|n| n.geometric_bounds().unwrap()).collect();
+    let near =
+        |r: Rect, x0: f64, y0: f64, x1: f64, y1: f64| [(r.x0, x0), (r.y0, y0), (r.x1, x1), (r.y1, y1)].iter().all(|(a, b)| (a - b).abs() < 1e-6);
+    assert!(near(b[0], 100.0, 100.0, 150.0, 150.0), "{:?}", b[0]);
+    assert!(near(b[1], 100.0, 0.0, 150.0, 50.0), "{:?}", b[1]);
+    assert!(near(b[2], -20.0, 0.0, 0.0, 50.0), "{:?}", b[2]);
+}
+
+/// #1561: percentages in a `<symbol>` with a `viewBox` are of the `viewBox`, so the symbol draws as
+/// the same one written with numbers.
+#[test]
+fn percentages_in_a_symbol_are_of_its_view_box() {
+    let drawing = |w: &str, h: &str, cx: &str, cy: &str| {
+        let s = svg(&format!(
+            r##"<defs><symbol id="s" viewBox="0 0 100 50"><rect width="{w}" height="{h}" fill="red"/><circle cx="{cx}" cy="{cy}" r="20" fill="blue"/></symbol></defs>
+            <use xlink:href="#s" x="20" y="10" width="160" height="100"/>"##
+        ));
+        render_artboard(&import_with(&s, &ImportOptions::default()).unwrap().0)
+    };
+    assert_similar(&drawing("100%", "100%", "25%", "50%"), &drawing("100", "50", "25", "25"), 24.0, 0.001);
+}
+
+/// #1598: an unsupported filter's warning names the filter, its primitives and the object, and
+/// says it is drawn without it (not "a group": usvg wraps the element in one).
+#[test]
+fn unsupported_filters_are_named_in_the_warning() {
+    let body = r#"<filter id="f"><feColorMatrix type="saturate" values="0"/></filter><filter id="t"><feTurbulence baseFrequency="0.05"/></filter>
+        <rect x="20" y="20" width="60" height="60" fill="red" filter="url(#f)"/>
+        <rect id="r" x="100" y="20" width="60" height="60" fill="blue" filter="url(#t)"/>"#;
+    let (d, w) = import_with_report(&svg(body)).unwrap();
+    assert!(w.iter().any(|w| w == "filter 'f' (feColorMatrix) on an object isn't supported; drawn without it"), "{w:?}");
+    assert!(w.iter().any(|w| w == "filter 't' (feTurbulence) on 'r' isn't supported; drawn without it"), "{w:?}");
+    assert_eq!(art(&d).iter().filter(|n| n.path_data().is_some()).count(), 2, "both drawn");
+}
+
+/// #1601: Inkscape's pages become artboards, at their places (through the viewBox) and with their
+/// labels.
+#[test]
+fn inkscape_pages_become_artboards() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" width="200" height="200" viewBox="0 0 100 100">
+        <sodipodi:namedview><inkscape:page x="0" y="0" width="100" height="100" inkscape:label="Front"/><inkscape:page x="120" y="0" width="60" height="150"/><inkscape:page x="0" y="0" width="0" height="10"/></sodipodi:namedview>
+        <rect x="10" y="10" width="80" height="80" fill="red"/></svg>"#;
+    let d = import_with(svg, &ImportOptions::default()).unwrap().0;
+    let b: Vec<(String, Rect)> = d.artboards.iter().map(|a| (a.name.clone(), a.rect)).collect();
+    assert_eq!(b, vec![("Front".to_string(), Rect::new(0.0, 0.0, 200.0, 200.0)), ("Artboard 2".to_string(), Rect::new(240.0, 0.0, 360.0, 300.0))]);
+    // Hostile boxes (too large to add up, not numbers, negative) are no pages, and at most 1,000 are read.
+    let pages = r#"<inkscape:page x="1e308" y="0" width="1e308" height="10"/><inkscape:page x="NaN" y="0" width="10" height="10"/><inkscape:page width="inf" height="10"/><inkscape:page width="-5" height="10"/>"#.to_string()
+        + &r#"<inkscape:page width="10" height="10"/>"#.repeat(1500);
+    let hostile = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="50" height="50"><g>{pages}</g></svg>"#
+    );
+    let d = import_with(&hostile, &ImportOptions::default()).unwrap().0;
+    assert_eq!(d.artboards.len(), 1000);
+    assert!(d.artboards.iter().all(|a| a.rect == Rect::new(0.0, 0.0, 10.0, 10.0)), "{:?}", d.artboards.first());
+    // A file without pages keeps its one artboard.
+    let d = import_with(&svg_doc(), &ImportOptions::default()).unwrap().0;
+    assert_eq!(d.artboards.len(), 1);
+}
+
+fn svg_doc() -> String {
+    svg(r#"<rect x="10" y="10" width="20" height="20"/>"#)
+}

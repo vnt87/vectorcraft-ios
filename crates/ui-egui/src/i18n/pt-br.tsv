@@ -349,6 +349,59 @@
 	Character Style Options	Opções de Estilo de Caractere
 	Character Styles	Estilos de Caractere
 	Check Links	Verificar Links
+# Check Script (File › Scripts) and the report it shows on a script written for the reference app.
+	Check Script	Verificar Script
+	Check Script…	Verificar Script…
+	Copy Report	Copiar Relatório
+	VectorCraft read this script without running it.	O VectorCraft leu este script sem executá-lo.
+	Needs nothing beyond plain JavaScript	Precisa apenas de JavaScript simples
+	Needs the script language's own objects or directives	Precisa de objetos ou diretivas próprios da linguagem do script
+	Needs the document model	Precisa do modelo de documento
+	Needs files	Precisa de arquivos
+	Needs menu commands	Precisa de comandos de menu
+	Needs dialogs	Precisa de caixas de diálogo
+	Needs features only the reference app has	Precisa de recursos que só o aplicativo de referência tem
+	Outside the document	Fora do documento
+	Writes, moves or deletes files	Grava, move ou exclui arquivos
+	Opens files in other apps	Abre arquivos em outros aplicativos
+	Opens network connections	Abre conexões de rede
+	Loads native code	Carrega código nativo
+	Sends messages to other apps	Envia mensagens a outros aplicativos
+	Reads or sets environment variables	Lê ou define variáveis de ambiente
+	Runs code the checker can't read	Executa código que a verificação não consegue ler
+	Changes the reference app's preferences	Altera as preferências do aplicativo de referência
+	Menu commands	Comandos de menu
+	Names the script builds as it runs: {count}	Nomes que o script monta durante a execução: {count}
+	Document model	Modelo de documento
+	Object types: {names}	Tipos de objeto: {names}
+	Directives	Diretivas
+	Includes	Arquivos incluídos
+	Checked	Verificado
+	Not followed: outside the script's folder	Ignorado: fora da pasta do script
+	Includes itself	Inclui a si mesmo
+	Not read	Não lido
+	Not read: a limit was reached	Não lido: um limite foi atingido
+	Compiled or not text	Compilado ou não é texto
+	Problems	Problemas
+	String not closed	String não fechada
+	Comment not closed	Comentário não fechado
+	Regular expression not closed	Expressão regular não fechada
+	Template literal not closed	Literal de modelo não fechado
+	XML literal not closed	Literal XML não fechado
+	Bracket never closed	Delimitador não fechado
+	Closing bracket with no opening one	Delimitador de fechamento sem abertura
+	Syntax newer than ES3	Sintaxe mais recente que ES3
+	Unknown directive	Diretiva desconhecida
+	Not valid UTF-8: unreadable bytes were replaced	UTF-8 inválido: bytes ilegíveis foram substituídos
+	Mixed line endings	Quebras de linha misturadas
+	Nesting too deep to follow	Aninhamento profundo demais para seguir
+	line {line}	linha {line}
+	lines {lines}	linhas {lines}
+	{file}, line {line}	{file}, linha {line}
+	Compiled script: ask its author for the .jsx file	Script compilado: peça o arquivo .jsx ao autor
+	Too large to check	Grande demais para verificar
+	Not a script for the reference app	Não é um script para o aplicativo de referência
+	Some lists were cut short at their limit.	Algumas listas foram cortadas no limite.
 	Check Spelling…	Verificar Ortografia…
 	Choose a folder	Escolher uma pasta
 	Choose…	Escolher…
@@ -983,6 +1036,8 @@
 	Graphic Style Library	Biblioteca de Estilos Gráficos
 	Graphic Style Options	Opções de Estilo Gráfico
 	Graphic Style Options…	Opções de Estilo Gráfico…
+	Symbol Options	Opções de Símbolo
+	Symbol Options…	Opções de Símbolo…
 	Graphic Styles	Estilos Gráficos
 	Graphic Styles Options	Opções de Estilos Gráficos
 	Graphics Processor	Processador Gráfico
@@ -1070,7 +1125,7 @@
 	Identify Objects By	Identificar Objetos Por
 	Ignore	Ignorar
 	Ignore Artboards (all the art as one page)	Ignorar Mesas de Trabalho (toda a arte como uma página)
-	Ignore White	Ignorar Branco
+	Ignore Color	Ignorar Cor
 	Image Info	Informações da Imagem
 	Image Map:	Mapa da Imagem:
 	Image Size	Tamanho da Imagem
@@ -2658,6 +2713,7 @@
 	{warning}: click to correct to the closest color ({hex})	{warning}: clique para corrigir para a cor mais próxima ({hex})
 	“{file}” is protected by a password.	“{file}” é protegido por uma senha.
 	● Recording	● Gravando
+imageTrace	Outline	Contorno
 @plural	{n} item|{n} items	{n} item|{n} itens
 @plural	Color Table ({n} color)|Color Table ({n} colors)	Tabela de Cores ({n} cor)|Tabela de Cores ({n} cores)
 @plural	Delete this {n} graphic style?|Delete these {n} graphic styles?	Excluir este {n} estilo gráfico?|Excluir estes {n} estilos gráficos?
@@ -3088,6 +3144,7 @@ axis	Both	Ambos
 @msg	No saved selections (Select → Save Selection…)	Nenhuma seleção salva (Selecionar → Salvar seleção…)
 @msg	No saved views (View → New View…)	Nenhuma vista salva (Exibir → Nova vista…)
 @msg	Offset Path: select paths	Deslocar traçado: selecione traçados
+@msg	Offset Path: the offset leaves nothing of the selected paths (an inset larger than the shapes)	Deslocar traçado: o deslocamento não deixa nada dos traçados selecionados (um deslocamento para dentro maior que as formas)
 @msg	Opened with {_1} note(s): {_2}	Aberto com {_1} observação(ões): {_2}
 @msg	Opened {url}	{url} aberto
 @msg	Outline Stroke: no stroked paths selected	Contornar traço: nenhum traçado com traço selecionado
@@ -3684,3 +3741,9 @@ axis	Both	Ambos
 	Use Outside Rectangle As Frame	Usar Retângulo Externo como Moldura
 	Create Compound Path From Ellipses	Criar Caminho Composto a partir das Elipses
 	Fill Grid	Preencher Grade
+	Select two or more objects, or a group	Selecione dois ou mais objetos, ou um grupo
+	Transform Objects	Transformar objetos
+@msg	unknown parameter `{key}`; did you mean `{near}`?	parâmetro desconhecido `{key}`; você quis dizer `{near}`?
+@msg	unknown parameter `{key}`; the command takes no parameters	parâmetro desconhecido `{key}`; o comando não tem parâmetros
+@msg	unknown parameter `{key}`; the command takes: {keys}	parâmetro desconhecido `{key}`; o comando aceita: {keys}
+	Load EPS into Clipboard	Carregar EPS na Área de Transferência

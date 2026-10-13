@@ -10,6 +10,7 @@ use vectorcraft_doc::{CharStyle, Guide, Node, NodeId, NodeKind, SavedSelection, 
 use vectorcraft_geom::Vec2;
 
 use super::edit::selected_roots;
+use super::pathops::Beside;
 use super::select::{selectable_ids, walk_selectable};
 use super::*;
 
@@ -197,7 +198,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Move Guide",
             [],
             None,
-            "{index, pos: pt} put ruler guide `index` at `pos` | {dx?, dy?: pt, copy?: bool} move the selected guides (vertical ones by dx, horizontal ones by dy); copy leaves them and selects the moved copies",
+            "{index, pos: pt} | {dx?, dy?: pt, copy?: bool} put ruler guide `index` at `pos`, or move the selected guides (vertical ones by dx, horizontal ones by dy); copy leaves them and selects the moved copies",
             guides_unlocked,
             guide_move
         ),
@@ -225,7 +226,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "File Info…",
             ["File"],
             Some("Cmd+Alt+Shift+I"),
-            "{title?, author?, authorTitle?, description?, keywords?: [string…]|\"a, b\" (each once), rating?: 0–5, copyrightStatus?: \"unknown\"|\"copyrighted\"|\"publicDomain\", copyrightNotice?, copyrightUrl?} set the File Info in one undo step (SVG with metadata, PDF and PNG exports carry it); no params → {title, author, authorTitle, description, keywords, rating, copyrightStatus, copyrightNotice, copyrightUrl, created, modified (ISO 8601 UTC or null; read-only), colorMode, units, artboards, objects}",
+            "{title?, author?, authorTitle?, description?, keywords?: [string…]|\"a, b\" (each once), rating?: 0–5, copyrightStatus?: \"unknown\"|\"copyrighted\"|\"publicDomain\", copyrightNotice?, copyrightUrl?, created?, modified?, colorMode?, units?, artboards?, objects? (the last six only as read back; ignored)} set the File Info in one undo step (SVG with metadata, PDF and PNG exports carry it); no params → {title, author, authorTitle, description, keywords, rating, copyrightStatus, copyrightNotice, copyrightUrl, created, modified (ISO 8601 UTC or null; read-only), colorMode, units, artboards, objects}",
             has_doc,
             super::fileinfo::file_info
         ),
@@ -488,8 +489,10 @@ fn release_guides(s: &mut Session, _: &Value) -> Result<Value> {
 fn lock_guides(s: &mut Session, p: &Value) -> Result<Value> {
     let v = p.get("locked").and_then(Value::as_bool).unwrap_or(!s.menu.guides_locked);
     s.menu.guides_locked = v;
-    // Locked guides can't stay selected.
-    if v && !s.doc()?.selection.guides.is_empty() {
+    // Locked guides can't stay selected, ruler guides or guide paths ([`Session::select`] lets
+    // those go).
+    let st = s.doc()?;
+    if v && (!st.selection.guides.is_empty() || st.selection.objects.iter().any(|id| crate::is_guide_path(&st.doc, *id))) {
         s.select(|_, sel| sel.guides.clear())?;
     }
     Ok(json!({ "locked": v }))
@@ -504,10 +507,13 @@ fn clear_guides(s: &mut Session, _: &Value) -> Result<Value> {
     }
     s.edit("Clear Guides", |d, _| {
         d.guides.clear();
+        let mut gone = Beside::replacing(d, &paths);
         for id in &paths {
-            let _ = d.remove(*id);
+            if d.node(*id).is_some() {
+                gone.put(d, *id, vec![])?;
+            }
         }
-        Ok(())
+        gone.finish(d)
     })?;
     Ok(json!({ "count": n }))
 }

@@ -4,9 +4,10 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 use vectorcraft_doc::{NodeId, NodeKind, Scaling};
-use vectorcraft_geom::{AnchorKind, PathData, Point, SubPath, Vec2};
+use vectorcraft_geom::{Anchor, AnchorKind, PathData, Point, SubPath, Vec2};
 
 use super::create::anchor_from_json;
+use super::pathops::Beside;
 use super::*;
 use crate::EngineError;
 
@@ -54,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Reverse Path Direction",
             ["Object", "Path"],
             None,
-            "{ids?, reversed?: bool (true: every subpath runs counter-clockwise on screen, false: clockwise, the Attributes panel's Reverse Path Direction On / Off; omitted: flip each path)} the paths in ids or the selection (groups and compound paths: the paths inside), as one undo step → {changed: paths}",
+            "{ids?|id?, reversed?: bool (true: every subpath runs counter-clockwise on screen, false: clockwise, the Attributes panel's Reverse Path Direction On / Off; omitted: flip each path)} the paths in ids or the selection (groups and compound paths: the paths inside), as one undo step → {changed: paths}",
             has_doc,
             reverse
         ),
@@ -63,7 +64,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Join",
             ["Object", "Path"],
             Some("Cmd+J"),
-            "{ids?: [path, path] (default: the selected paths), ends?: [\"first\"|\"last\", \"first\"|\"last\"] (which end of each path to join, as the Pen joins them; default: the nearest pair)} join two open paths into one (the first keeps its id, selected), or close a single open path",
+            "{ids?: [path, path] (default: the selected paths), ends?: [\"first\"|\"last\", \"first\"|\"last\"] (which end of each path to join, as the Pen joins them; default: the nearest pair)} join two open paths into one (the first keeps its id, selected), or close a single open path; without ids, direct-selected anchors lying on one another along a path merge into one anchor instead",
             has_selection,
             join
         ),
@@ -299,6 +300,37 @@ fn end_points(sp: &SubPath) -> Option<(Point, Point)> {
     Some((sp.anchors.first()?.p, sp.anchors.last()?.p))
 }
 
+/// Merge each run of `picked` neighbours of `sp` that lie on one another into one anchor, which
+/// keeps the first one's incoming handle and the last one's outgoing handle. Returns how many
+/// anchors went.
+fn merge_coincident(sp: &mut SubPath, picked: impl Fn(usize) -> bool) -> usize {
+    let same = |a: &Anchor, b: &Anchor| a.p.distance(b.p) < 1e-6;
+    let before = sp.anchors.len();
+    // The closing pair of a closed path first: taking the last anchor moves no other index.
+    if sp.closed
+        && before > 2
+        && picked(0)
+        && picked(before - 1)
+        && let [first, .., last] = sp.anchors.as_mut_slice()
+        && same(first, last)
+    {
+        first.h_in = last.h_in;
+        sp.anchors.pop();
+    }
+    // Back to front, so the indices `picked` knows stay true for the anchors still to visit.
+    for i in (1..sp.anchors.len()).rev() {
+        if picked(i - 1)
+            && picked(i)
+            && let Some([a, b]) = sp.anchors.get_mut(i - 1..=i)
+            && same(a, b)
+        {
+            a.h_out = b.h_out;
+            sp.anchors.remove(i);
+        }
+    }
+    before - sp.anchors.len()
+}
+
 fn join(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "path.join";
     let ids = match ids_param(p, "ids") {
@@ -311,6 +343,31 @@ fn join(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => selected_paths(s)?,
     };
+    // Direct-selected anchors lying on one another along a path (two corners brought together by
+    // Average) become one anchor; the paths themselves are joined only when there are none.
+    if p.get("ids").is_none() {
+        let st = s.doc()?;
+        let mut merged = vec![];
+        for (id, picked) in &st.selection.anchors {
+            let Some(mut path) = st.doc.node(*id).and_then(|n| n.path_data()).cloned() else { continue };
+            let n: usize = path.subpaths.iter_mut().enumerate().map(|(si, sp)| merge_coincident(sp, |ai| picked.contains(&(si, ai)))).sum();
+            if n > 0 {
+                merged.push((*id, path));
+            }
+        }
+        if !merged.is_empty() {
+            let objects = st.selection.objects.clone();
+            s.edit("Join", |d, sel| {
+                for (id, path) in merged {
+                    *path_mut(d, id)? = path;
+                }
+                // The anchor indices changed: the paths stay selected, whole.
+                sel.set(objects);
+                Ok(())
+            })?;
+            return ok();
+        }
+    }
     // The ends to join, as (reverse the first path, reverse the second): the first path's end
     // must come last, the second's first.
     let ends = match p.get("ends") {
@@ -466,6 +523,7 @@ pub(crate) fn delete_anchors(s: &mut Session, _: &Value) -> Result<Value> {
     let segments = st.selection.segments.clone();
     s.edit("Clear", |d, selection| {
         let mut survivors = vec![];
+        let mut emptied = Beside::replacing(d, &sel.keys().copied().collect::<Vec<_>>());
         for (id, set) in &sel {
             let remove_node = {
                 let path = path_mut(d, *id)?;
@@ -499,11 +557,12 @@ pub(crate) fn delete_anchors(s: &mut Session, _: &Value) -> Result<Value> {
                 path.subpaths.is_empty()
             };
             if remove_node {
-                d.remove(*id)?;
+                emptied.put(d, *id, vec![])?;
             } else if segments.contains_key(id) {
                 survivors.push(*id);
             }
         }
+        emptied.finish(d)?;
         // Another Delete removes the remaining path after a segment cut. Anchor Delete keeps
         // its existing deselection behavior.
         selection.set(survivors);
@@ -625,11 +684,12 @@ fn cut_at_anchors(s: &mut Session, _: &Value) -> Result<Value> {
     }
     let ids = s.edit("Cut Path", |d, sel| {
         let (mut all, mut picked) = (vec![], vec![]);
+        let mut cut = Beside::replacing(d, &cuts.iter().map(|(id, ..)| *id).collect::<Vec<_>>());
         for (id, subs, starts) in cuts {
             // A path of one subpath becomes one path per piece (the first keeps the id); the
             // pieces of a compound shape stay subpaths of it.
             if d.node(id).and_then(|n| n.path_data()).is_some_and(|pd| pd.subpaths.len() == 1) {
-                let ids = super::draw2::replace_with_pieces(d, id, subs.into_iter().map(PathData::single).collect())?;
+                let ids = super::draw2::replace_with_pieces(d, &mut cut, id, subs.into_iter().map(PathData::single).collect())?;
                 picked.extend(ids.iter().zip(&starts).filter(|(_, s)| **s).map(|(id, _)| (*id, (0, 0))));
                 all.extend(ids);
             } else {
@@ -638,6 +698,7 @@ fn cut_at_anchors(s: &mut Session, _: &Value) -> Result<Value> {
                 all.push(id);
             }
         }
+        cut.finish(d)?;
         // Each cut leaves one of its two coincident anchors selected, so a drag pulls the ends apart.
         sel.clear();
         for (id, a) in picked {
