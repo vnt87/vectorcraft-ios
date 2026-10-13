@@ -31,15 +31,18 @@ on huge documents. Pen input is pressure-only and Windows-first.
 
 ## iPadOS (fork)
 
-Only what has been demonstrated, on the iPad Air 11-inch (M3) Simulator with iPadOS 26.2 (2026-10-13):
-the Debug app builds for Apple Silicon, installs, launches, renders the editor in landscape, and lays out
-inside the safe area (UIKit bottom inset 20 pt, top inset 32 pt while the status bar shows, then 0). Not
-verified: a physical iPad, Apple Pencil, touch gestures, document pickers, multitasking, Release builds.
+Demonstrated on the iPad Air 11-inch (M3) Simulator with iPadOS 26.2 (2026-10-13): the Debug app builds
+for Apple Silicon, installs, launches, renders the editor in landscape, and lays out inside the safe area
+(UIKit bottom inset 20 pt, top inset 32 pt while the status bar shows, then 0).
+
+User-reported on a physical iPad Air 13-inch (M3), Debug build (2026-10-13; not instrumented): Open and Save
+through the Files picker work, pinch to zoom works, Apple Pencil input works. Not verified: Pencil pressure
+(deferred; the tools tried do not use it), tilt, hover, two-finger pan, rotation, multitasking, Release builds.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-13 | minor | iPadOS fork section: simulator launch and safe-area layout only; nothing else claimed |
+| 2026-10-13 | minor | iPadOS fork section: simulator launch and safe-area layout, plus user-reported Files open/save, pinch zoom and Pencil input on a physical iPad |
 | 2026-10-11 | minor | Preferences › Performance › Linux Display Server › X11 (XWayland) opens the window through XWayland on a Wayland session, where pens and dropped files reach the app (#1151); score unchanged (estimated) |
 | 2026-10-10 | major | First checklist from the canvas, touch and graphics code and the open hardware issues |

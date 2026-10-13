@@ -26,11 +26,15 @@ web builds, downloads, the other Crafting Apps, contributing), read the upstream
 
 ## Status
 
-Verified: the app builds for the iPad Simulator (Apple Silicon), installs, launches, renders the editor in
-landscape, and keeps the UI inside the safe area (iPad Air 11-inch M3 simulator, iPadOS 26.2). **Not yet
-verified:** a physical iPad, Apple Pencil (pressure, tilt, hover), touch gestures (pinch, pan, rotate),
-opening and saving through the Files picker, multitasking, Release builds. Folder picking and the system
-clipboard are not implemented yet. This is a first bootstrap, not a hardware sign-off.
+Verified in the iPad Air 11-inch M3 simulator (iPadOS 26.2): the app builds, installs, launches, renders
+the editor in landscape and keeps the UI inside the safe area.
+
+User-reported on a physical iPad Air 13-inch (M3), Debug build (2026-10-13), not instrumented: Open and
+Save work through the Files picker, pinch to zoom works, and Apple Pencil input works.
+
+**Not yet verified:** Apple Pencil pressure (the tools tried did not use it), tilt and hover, two-finger
+pan and rotation, multitasking, Release builds. Folder picking and the system clipboard are not implemented
+yet. This is a first bootstrap, not a hardware sign-off.
 
 ## Build and run
 
