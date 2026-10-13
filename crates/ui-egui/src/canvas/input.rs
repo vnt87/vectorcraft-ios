@@ -11,7 +11,7 @@ use super::{Color32, Drag, Mods, Point, PointerEvent, PointerKind, Pos2, Shape, 
 
 /// Dispatch canvas pointer, keyboard and drop events through the active document view.
 pub(super) fn handle_input(app: &mut VectorcraftApp, ui: &Ui, resp: &egui::Response, rect: egui::Rect) {
-    let (pointer, m, space, hover) = wheel_view(app, ui, resp, rect);
+    let (pointer, m, space, hover, palm) = wheel_view(app, ui, resp, rect);
     let v = *app.view().unwrap_or(&View::default());
     let xf = Xf::new(rect, &v);
     // A lifted pen or finger takes the pointer away in the frame it lifts (egui's `PointerGone`),
@@ -86,6 +86,7 @@ pub(super) fn handle_input(app: &mut VectorcraftApp, ui: &Ui, resp: &egui::Respo
     if pointer.primary_pressed()
         && resp.hovered()
         && !middle_pan
+        && !palm
         && drag != Some(Drag::Gesture)
         && let Some(p) = at
     {
@@ -201,6 +202,10 @@ fn wheel_view(
     if turn.glide != 0.0 {
         ui.ctx().request_repaint();
     }
+    // Two fingers pan, pinch and rotate the view; a palm beside the pen paints nothing. The view is
+    // read after, and egui's own multi-touch zoom and pan are dropped for the frame.
+    let (gesturing, palm) = finger_gestures(app, ui, rect);
+    let (factor, scroll) = if gesturing { (1.0, egui::Vec2::ZERO) } else { (factor, scroll) };
     let hover = pointer.hover_pos().filter(|p| rect.contains(*p));
     // Zoom around the pointer, and scroll ([`wheel`]): fingers pinching on a touch screen may also
     // slide. Then turn the view about the pointer for a trackpad rotation ([`trackpad_turn`]). The
@@ -221,7 +226,32 @@ fn wheel_view(
             rotate_about(vm, rect, p, deg);
         }
     }
-    (pointer, m, space, hover)
+    (pointer, m, space, hover, palm)
+}
+
+/// This frame's two-finger gesture ([`crate::gestures`]): applies its pan, pinch and rotation to the
+/// view. Returns whether two fingers are gesturing, and whether the emulated pointer is a palm
+/// (a lone finger beside a hovering pen) or part of a gesture, which paint nothing.
+fn finger_gestures(app: &mut VectorcraftApp, ui: &Ui, rect: egui::Rect) -> (bool, bool) {
+    let ctx = ui.ctx();
+    let id = egui::Id::new(("canvas-gestures", ctx.viewport_id()));
+    let events = ui.input(|i| i.events.clone());
+    let mut rec = ctx.data_mut(|d| d.get_temp::<crate::gestures::GestureRecognizer>(id)).unwrap_or_default();
+    let pen = app.pen.clone();
+    let deltas = rec.feed_frame_with(ctx.cumulative_frame_nr(), &events, rect, |touch| pen.is_pen_touch(touch));
+    // Enable Touch Gestures turns the finger gestures off; a palm is still a palm.
+    let gestures = app.session.prefs.touch_gestures;
+    if gestures && let Some(vm) = app.view_mut() {
+        for d in &deltas {
+            crate::gestures::apply_to_view(vm, rect, d);
+        }
+    }
+    if !deltas.is_empty() {
+        ctx.request_repaint();
+    }
+    let state = (gestures && rec.is_gesturing(), rec.blocks_painting(pen.hovering()));
+    ctx.data_mut(|d| d.insert_temp(id, rec));
+    state
 }
 
 /// In Presentation Mode a click anywhere goes to the next artboard. The tool receives no press, drag or hover, and a

@@ -11,7 +11,7 @@ use super::state::{
 use super::{
     Arc, AutomationRoots, ControlRequest, Ordering, Receiver, Session, UiState, Value, VectorcraftApp, View, ViewInfo, background, canvas, chrome,
     clipboard_probe, dialogs, export_progress, file_access, fileio, font_menu, graphics, i18n, io, json, menus, native_menu, opening, palette,
-    panel_docking, panels, picks, place, placing, plugin_runs, prefs_dialog, recovery, screen_color, scrub, shortcut_editor, shortcuts, theme,
+    panel_docking, panels, pen, picks, place, placing, plugin_runs, prefs_dialog, recovery, screen_color, scrub, shortcut_editor, shortcuts, theme,
     titlebar, toolbar, tools_float, trace_runs, unsaved, updates_ui, widgets,
 };
 
@@ -102,6 +102,7 @@ impl VectorcraftApp {
             frame_rate: Default::default(),
             canvas_rect: None,
             hover_doc: None,
+            pen: pen::PenFeed::default(),
             custom_titlebar: false,
             last_window_title: String::new(),
             fullscreen_for_mode: false,

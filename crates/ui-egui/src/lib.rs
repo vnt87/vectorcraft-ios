@@ -40,6 +40,7 @@ pub mod find_font;
 pub mod font_menu;
 mod frame_rate;
 mod free_transform;
+pub mod gestures;
 pub mod graphics;
 pub mod i18n;
 pub mod icon_data;
@@ -54,6 +55,7 @@ pub mod opening;
 pub mod palette;
 mod panel_docking;
 pub mod panels;
+pub mod pen;
 pub mod picks;
 pub mod place;
 pub mod placing;
@@ -169,6 +171,8 @@ pub struct VectorcraftApp {
     pub canvas_rect: Option<egui::Rect>,
     /// Hover position in document coordinates.
     pub hover_doc: Option<vectorcraft_geom::Point>,
+    /// Which touches are an Apple Pencil, and whether it hovers (written by the iPadOS runner).
+    pub pen: pen::PenFeed,
     /// System clipboard: SVG to publish next frame, the last SVG we published (so pasting it back
     /// uses the lossless internal clipboard) and what came with a paste (a Paste event's text, a
     /// picture or file the host read: [`Self::paste_from_host`]).

@@ -4189,9 +4189,52 @@ fn two_fingers_dragged_together_pan_the_canvas() {
         frame(&mut app, &ctx, fingers(egui::TouchPhase::End, vec2(30.0, 24.0)));
         let after = *app.view().unwrap();
         let moved = (after.center - before.center) * after.zoom;
-        assert!((after.zoom / before.zoom - 1.0).abs() < 1e-9, "no zoom: {wheel_zooms}");
+        // Each finger's move is its own step (f32 geometry): the zoom is 1 to within rounding.
+        assert!((after.zoom / before.zoom - 1.0).abs() < 1e-6, "no zoom: {wheel_zooms}");
         assert!((moved.x + 30.0).abs() < 0.5 && (moved.y + 24.0).abs() < 0.5, "the content follows the fingers ({wheel_zooms}): {moved:?}");
         assert_eq!(app.session.active().unwrap().doc.layers[0].children().unwrap().len(), 0, "nothing drawn");
+    }
+}
+
+/// Two fingers turning about each other rotate the view (clockwise fingers, clockwise view).
+#[test]
+fn two_fingers_turning_rotate_the_view() {
+    let mut app = VectorcraftApp::new(Session::new(), Default::default());
+    app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+    app.select_tool("rectangle");
+    let ctx = egui::Context::default();
+    frame(&mut app, &ctx, vec![]);
+    let c = app.canvas_rect.unwrap().center();
+    let touch = |n: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(n), phase, pos, force: None };
+    frame(&mut app, &ctx, vec![egui::Event::PointerMoved(c - vec2(40.0, 0.0))]);
+    frame(&mut app, &ctx, vec![touch(1, egui::TouchPhase::Start, c - vec2(40.0, 0.0)), touch(2, egui::TouchPhase::Start, c + vec2(40.0, 0.0))]);
+    // The second finger swings from the right of the first to below it: a quarter turn clockwise.
+    frame(&mut app, &ctx, vec![touch(2, egui::TouchPhase::Move, c - vec2(40.0, -80.0))]);
+    frame(&mut app, &ctx, vec![touch(1, egui::TouchPhase::End, c - vec2(40.0, 0.0)), touch(2, egui::TouchPhase::End, c - vec2(40.0, -80.0))]);
+    let rotation = app.view().unwrap().rotation;
+    assert!((rotation - 90.0).abs() < 1.0, "a quarter turn: {rotation}");
+    assert_eq!(app.session.active().unwrap().doc.layers[0].children().unwrap().len(), 0, "nothing drawn");
+}
+
+/// A finger resting beside a hovering pen is a palm: its press paints nothing.
+#[test]
+fn a_palm_beside_a_hovering_pen_draws_nothing() {
+    for hovering in [true, false] {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        app.select_tool("rectangle");
+        app.pen.set_hovering(hovering);
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, vec![]);
+        let c = app.canvas_rect.unwrap().center();
+        let touch = |phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(5), phase, pos, force: None };
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let end = c + vec2(60.0, 40.0);
+        frame(&mut app, &ctx, vec![touch(egui::TouchPhase::Start, c), egui::Event::PointerMoved(c), button(c, true)]);
+        frame(&mut app, &ctx, vec![touch(egui::TouchPhase::Move, end), egui::Event::PointerMoved(end)]);
+        frame(&mut app, &ctx, vec![touch(egui::TouchPhase::End, end), button(end, false), egui::Event::PointerGone]);
+        let drawn = app.session.active().unwrap().doc.layers[0].children().unwrap().len();
+        assert_eq!(drawn, usize::from(!hovering), "pen near: {hovering}");
     }
 }
 
