@@ -19,12 +19,12 @@ usage: cargo xtask ios (--sim | --device) [--release] [options]
   --sim-name NAME     simulator to boot (default: \"iPad Air 11-inch (M3)\")
   --show-simulator    open the desktop Simulator viewer (requires the full Xcode app)
   --device-id ID      device identifier for --device (see `xcrun devicectl list devices`);
-                      also read from $PHOTOCRAFT_IOS_DEVICE
+                      also read from $VECTORCRAFT_IOS_DEVICE
   --team ID           Apple development team id for signing (DEVELOPMENT_TEAM);
-                      also read from $PHOTOCRAFT_IOS_TEAM
+                      also read from $VECTORCRAFT_IOS_TEAM
   --bundle-id ID      override the bundle identifier (PRODUCT_BUNDLE_IDENTIFIER) for the build and
                       the launch, e.g. a team-unique development id when the canonical one cannot
-                      be registered to your team; also read from $PHOTOCRAFT_IOS_BUNDLE_ID
+                      be registered to your team; also read from $VECTORCRAFT_IOS_BUNDLE_ID
   -h, --help          print this help
 
 --sim and --device need macOS with Xcode and the Rust targets aarch64-apple-ios,
@@ -245,7 +245,7 @@ pub fn plan(o: &Options) -> Plan {
             None => {
                 steps.push(Step::new("xcrun", &["devicectl", "list", "devices"]));
                 notes.push(
-                    "no device id: built only. Pass --device-id <id> (or set PHOTOCRAFT_IOS_DEVICE) from the list above to install and launch."
+                    "no device id: built only. Pass --device-id <id> (or set VECTORCRAFT_IOS_DEVICE) from the list above to install and launch."
                         .into(),
                 );
             }
@@ -293,9 +293,9 @@ fn execute(plan: &Plan, root: &Path) -> Result<(), String> {
 
 /// Entry point for `cargo xtask ios`.
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
-    let env_device = std::env::var("PHOTOCRAFT_IOS_DEVICE").ok();
-    let env_team = std::env::var("PHOTOCRAFT_IOS_TEAM").ok();
-    let env_bundle = std::env::var("PHOTOCRAFT_IOS_BUNDLE_ID").ok();
+    let env_device = std::env::var("VECTORCRAFT_IOS_DEVICE").ok();
+    let env_team = std::env::var("VECTORCRAFT_IOS_TEAM").ok();
+    let env_bundle = std::env::var("VECTORCRAFT_IOS_BUNDLE_ID").ok();
     let env = Env { device: env_device.as_deref(), team: env_team.as_deref(), bundle_id: env_bundle.as_deref() };
     let o = match parse(args, env)? {
         Parsed::Help => {
