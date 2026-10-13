@@ -386,6 +386,18 @@ pub fn install(services: &mut Services, root: PathBuf, ui: egui::Context) -> Res
         }
         Some(receiver)
     }));
+    // The shared UI only offers a dialog when the matching in-line picker exists. On iPadOS every
+    // dialog goes through `start_pick`; these in-line pickers are never to block the UI thread, so
+    // they answer "cancelled" if the UI ever falls back to them.
+    services.pick_open = Some(Box::new(|_| {
+        log::warn!("In-line Open picker requested; iPadOS uses the asynchronous picker");
+        None
+    }));
+    services.pick_open_multi = Some(Box::new(Vec::new));
+    services.pick_save = Some(Box::new(|_| {
+        log::warn!("In-line Save picker requested; iPadOS uses the asynchronous picker");
+        None
+    }));
     services.read = Some(Box::new(|path| bounded_read(Path::new(path))));
     let write_root = root.clone();
     services.write = Some(Box::new(move |path, bytes| {
