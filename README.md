@@ -32,8 +32,13 @@ the editor in landscape and keeps the UI inside the safe area.
 User-reported on a physical iPad Air 13-inch (M3), Debug build (2026-10-13), not instrumented: Open and
 Save work through the Files picker, pinch to zoom works, and Apple Pencil input works.
 
-**Not yet verified:** Apple Pencil pressure (the tools tried did not use it), tilt and hover, two-finger
-pan and rotation, multitasking, Release builds. Folder picking and the system clipboard are not implemented
+Added in milestone 2 (iPadOS-6) and installed on the iPad, **not yet verified there**: two-finger pan and
+rotation (pinch zooms about the fingers), Apple Pencil hover (the tool cursor follows the floating tip),
+and palm rejection (a finger beside a hovering pen paints nothing). Host tests cover the gesture math, the
+pen/finger bookkeeping and the canvas behaviour; the UIKit hover code has not run with a Pencil yet.
+
+**Not yet verified:** Apple Pencil pressure (the tools tried did not use it), multitasking, Release
+builds. Pencil tilt, barrel roll, double-tap and the eraser end are not read: no tool takes them yet. Folder picking and the system clipboard are not implemented
 yet. This is a first bootstrap, not a hardware sign-off.
 
 ## Build and run
