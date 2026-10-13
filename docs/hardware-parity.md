@@ -40,7 +40,11 @@ for Apple Silicon, installs, launches, renders the editor in landscape, and lays
 
 User-reported on a physical iPad Air 13-inch (M3), Debug build (2026-10-13; not instrumented): Open and Save
 through the Files picker work, pinch to zoom works, Apple Pencil input works. Not verified: Pencil pressure
-(deferred; the tools tried do not use it), tilt, hover, two-finger pan, rotation, multitasking, Release builds.
+(deferred; the tools tried do not use it), multitasking, Release builds.
+
+Implemented, installed, awaiting a device check (2026-10-13): two-finger pan and rotation, pinch about the
+fingers, Pencil hover and palm rejection (`gestures.rs`, `pen.rs`; host-tested). Tilt, roll, double-tap and
+the eraser end are not read: no tool takes them.
 
 ## Revision history
 
@@ -52,6 +56,6 @@ through the Files picker work, pinch to zoom works, Apple Pencil input works. No
 | 2026-10-14 | minor | Tool cursors are painted into the window on Wayland (#1652; not run on Linux, #1645 stays open until confirmed); On Windows the custom title bar's window stays truly borderless, so the pointer lines up with what is drawn on systems where the hidden caption offset it (#1791, #1758; awaiting the reporter's confirmation); neither is confirmed on the hardware that reported it, so nothing is marked done |
 | 2026-10-13 | minor | Web: the shell reads pen and finger Pointer Events itself (pen pressure with coalesced events, Apple Pencil hover, palm rejection: after a pen contact fingers only navigate until reload; long press opens the context menu); score unchanged (estimated) |
 | 2026-10-13 | minor | A window whose surface is larger than 8192 px (stretched over several monitors, or grown by a drag between monitors of different scale) is configured up to the graphics adapter's limit instead of closing the app (#1495, part of #1459); the window growing during that drag on Windows is still open; not reproduced on a mixed-scale setup |
-| 2026-10-13 | minor | iPadOS fork section: simulator launch and safe-area layout, plus user-reported Files open/save, pinch zoom and Pencil input on a physical iPad |
+| 2026-10-13 | minor | iPadOS fork section: gesture engine, Pencil hover and palm rejection added (unverified on device); simulator launch and safe-area layout, plus user-reported Files open/save, pinch zoom and Pencil input on a physical iPad |
 | 2026-10-11 | minor | Preferences › Performance › Linux Display Server › X11 (XWayland) opens the window through XWayland on a Wayland session, where pens and dropped files reach the app (#1151); score unchanged (estimated) |
 | 2026-10-10 | major | First checklist from the canvas, touch and graphics code and the open hardware issues |
