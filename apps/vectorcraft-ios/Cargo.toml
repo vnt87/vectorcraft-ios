@@ -29,7 +29,7 @@ winit = { version = "=0.30.13", default-features = false }
 
 objc2 = "=0.6.4"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSData", "NSError", "NSURL", "NSString", "NSObject", "NSDictionary", "NSFileManager", "NSPathUtilities", "NSFileCoordinator", "NSFilePresenter", "NSOperation", "NSSet", "NSValue", "block2"] }
-objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIWindow", "UIScene", "UISceneSession", "UISceneOptions", "UIWindowScene", "UIResponder", "UIViewController", "UIDocumentPickerViewController", "UIView", "UIEvent", "UITouch", "UIGestureRecognizer", "block2", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
+objc2-ui-kit = { version = "=0.3.2", default-features = false, features = ["std", "UIApplication", "UIWindow", "UIScene", "UISceneSession", "UISceneOptions", "UIWindowScene", "UIResponder", "UIViewController", "UIDocumentPickerViewController", "UIView", "UIEvent", "UITouch", "UIGestureRecognizer", "UIGestureRecognizerSubclass", "UIHoverGestureRecognizer", "block2", "objc2-core-foundation", "objc2-uniform-type-identifiers"] }
 objc2-uniform-type-identifiers = { version = "=0.3.2", default-features = false, features = ["std", "UTType"] }
 block2 = "=0.6.2"
 dispatch2 = { version = "=0.3.1", default-features = false, features = ["std"] }

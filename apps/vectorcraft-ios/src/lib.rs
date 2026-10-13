@@ -14,6 +14,8 @@ mod documents;
 #[cfg(any(target_os = "ios", test))]
 mod logging;
 #[cfg(any(target_os = "ios", test))]
+pub mod pencil;
+#[cfg(any(target_os = "ios", test))]
 mod prefs;
 #[cfg(target_os = "ios")]
 mod safe_area;
@@ -84,6 +86,10 @@ pub fn run() -> Result<(), String> {
                     }
                 };
                 let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), services);
+                // Apple Pencil: which touches are the pen, and its hover (winit forwards only touch force).
+                if let Err(error) = pencil::install(app.pen.clone(), &cc.egui_ctx) {
+                    log::error!("Apple Pencil input unavailable: {error}");
+                }
                 match &root {
                     Some(root) => {
                         prefs::load(&mut app, prefs::read(root), root);
