@@ -31,6 +31,7 @@ pub(crate) mod gradient;
 pub(crate) mod graph;
 mod halftone;
 pub mod help;
+pub mod importmatches;
 pub(crate) mod inline;
 mod layer;
 mod layerpanel;
@@ -67,6 +68,7 @@ pub mod recovery;
 pub mod scripts;
 mod select;
 pub(crate) mod shaper;
+pub mod shortcutset;
 pub(crate) mod slices;
 mod stroke;
 mod style;
@@ -283,6 +285,8 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(cut::specs());
         v.extend(halftone::specs());
         v.extend(perspgrid::specs());
+        v.extend(shortcutset::specs());
+        v.extend(importmatches::specs());
         v
     })
 }
@@ -457,6 +461,7 @@ pub(crate) fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     (2..).map(|i| format!("{base} {i}")).find(|n| !taken(n)).unwrap_or_else(|| base.to_string())
 }
 
+pub(crate) use edit::{settle_interaction, typing_in_progress};
 pub(crate) use vectorcraft_doc::range::parse_range;
 
 /// A date param in Unix seconds that defaults to the clock: `None` when absent (now, see
@@ -492,6 +497,9 @@ pub use flatten::FlattenOptions;
 
 /// A built-in or saved flattener preset ([`crate::Prefs::flattener_presets`]).
 pub use flatten::FlattenerPreset;
+
+/// The shapes a group selected alone gives the Pathfinder panel.
+pub use pathops::shape_count;
 
 /// Command ids kept only so older scripts keep working: `(alias, the command it duplicates)`.
 /// They run as before but the command palette leaves them out (it lists the command once).

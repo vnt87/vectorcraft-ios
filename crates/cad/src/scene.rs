@@ -8,7 +8,7 @@ use std::io::Cursor;
 
 use kurbo::PathEl;
 use vectorcraft_color::Paint;
-use vectorcraft_doc::{AppearanceItem, Dash, Document, ImageObject, Node, NodeKind, StrokeLayer, TextKind, TextObject, Unit};
+use vectorcraft_doc::{AppearanceItem, Dash, Document, ImageObject, Node, NodeKind, StrokeLayer, SymbolBoxes, TextKind, TextObject, Unit};
 use vectorcraft_effects::stroke;
 use vectorcraft_geom::{Affine, BezPath, FillRule, PathData, Point, Rect};
 
@@ -158,6 +158,9 @@ struct LayerFlags {
 
 pub(crate) struct Scene<'a> {
     doc: &'a Document,
+    /// The art boxes of `doc`'s symbols, which the walk measures symbol instances by when it
+    /// crops to the region ([`SymbolBoxes::quick`]).
+    symbols: SymbolBoxes<'a>,
     o: &'a DxfOptions,
     /// Document space → drawing units (y up, origin at the region's bottom-left).
     to_dxf: Affine,
@@ -192,6 +195,7 @@ impl<'a> Scene<'a> {
         let r = o.region;
         Self {
             doc,
+            symbols: doc.symbol_boxes().quick(),
             o,
             to_dxf: Affine::new([k, 0.0, 0.0, -k, -r.x0 * k, r.y1 * k]),
             k,
@@ -271,7 +275,7 @@ impl<'a> Scene<'a> {
             return;
         }
         if self.o.crop && !layer {
-            match n.visual_bounds() {
+            match n.visual_bounds_with(&self.symbols) {
                 Some(b) if !overlaps(b, self.o.region) => return,
                 None if !n.is_container() => return,
                 _ => {}
@@ -502,7 +506,7 @@ impl<'a> Scene<'a> {
         let doc = self.doc;
         let brushes = self.brushes.get_or_insert_with(|| vectorcraft_brush::library(doc));
         let b = st.brush.as_deref().and_then(|name| brushes.iter().find(|b| b.name == name))?;
-        Some(vectorcraft_brush::stroke_pieces(b, bp, st))
+        Some(vectorcraft_brush::stroke_pieces(doc, b, bp, st))
     }
 
     /// A filled area as its outlines followed by a solid hatch (R12: the outlines alone). Laser

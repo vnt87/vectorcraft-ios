@@ -277,6 +277,10 @@ pub struct UiState {
     /// The Basic and Advanced toolbars as Edit Toolbar left them (none: as they ship).
     #[serde(default)]
     pub toolbar_edits: ToolbarEdits,
+    /// The controls under the toolbar's tools that the All Tools drawer's Show section shows
+    /// (`toolbar.show`).
+    #[serde(default)]
+    pub toolbar_show: ToolbarShow,
     /// Edit Toolbar's All Tools drawer is open beside the toolbar (`window.editToolbar`).
     #[serde(skip)]
     pub tools_drawer: bool,
@@ -302,6 +306,14 @@ pub struct UiState {
     pub dock: bool,
     pub view: ViewFlags,
     pub dialog: Option<Dialog>,
+    /// Messages to show in a dialog once the open one is closed (`dialogs::confirm::tell`), in
+    /// the order they came.
+    #[serde(skip)]
+    pub told: Vec<Dialog>,
+    /// A control request is being answered: its caller gets what fails as its reply, so no
+    /// dialog says it too (`io::report_write_error`).
+    #[serde(skip)]
+    pub answering_control: bool,
     /// Toolbar group whose flyout is open.
     pub flyout: Option<usize>,
     /// Last tool shown for each toolbar group (flyout selection sticks).
@@ -364,6 +376,10 @@ pub struct UiState {
     /// buttons follow ([`crate::panels::align::with_align_to`]).
     #[serde(default, deserialize_with = "crate::panels::align::deserialize_align_to")]
     pub align_to: crate::panels::align::AlignTo,
+    /// Color panel: the mode picked last from its menu (`None`: never picked), in which the panel
+    /// shows the defaults for new art ([`crate::panels::color::deserialize_mode`]).
+    #[serde(default, deserialize_with = "crate::panels::color::deserialize_mode")]
+    pub color_mode: Option<crate::panels::color::Mode>,
     /// The SVG Options chosen last (`svg` object of the export/save commands; null: never used).
     #[serde(default)]
     pub svg_options: Value,
@@ -452,6 +468,57 @@ pub struct ToolbarCategory {
     pub name: Option<String>,
     #[serde(default)]
     pub slots: Vec<Vec<String>>,
+}
+
+/// The controls under the toolbar's tools, each shown or hidden from the All Tools drawer's Show
+/// section: Fill and Stroke (the proxy), Coloring (Color, Gradient, None), Draw Mode and Screen
+/// Mode. All shown as it ships.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolbarShow {
+    #[serde(default = "yes")]
+    pub fill_stroke: bool,
+    #[serde(default = "yes")]
+    pub coloring: bool,
+    #[serde(default = "yes")]
+    pub draw_mode: bool,
+    #[serde(default = "yes")]
+    pub screen_mode: bool,
+}
+
+impl Default for ToolbarShow {
+    fn default() -> Self {
+        Self { fill_stroke: true, coloring: true, draw_mode: true, screen_mode: true }
+    }
+}
+
+impl ToolbarShow {
+    /// The controls as (`toolbar.show` name, label, icon), in the Show section's order.
+    pub const CONTROLS: [(&'static str, &'static str, &'static str); 4] = [
+        ("fillStroke", "Fill and Stroke Controls", "dc-stroke"),
+        ("coloring", "Coloring Controls", "dc-gradient"),
+        ("drawMode", "Draw Mode Controls", "dc-draw-normal"),
+        ("screenMode", "Screen Mode Controls", "dc-screen-mode"),
+    ];
+
+    /// The flag of the control named `name`.
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut bool> {
+        match name {
+            "fillStroke" => Some(&mut self.fill_stroke),
+            "coloring" => Some(&mut self.coloring),
+            "drawMode" => Some(&mut self.draw_mode),
+            "screenMode" => Some(&mut self.screen_mode),
+            _ => None,
+        }
+    }
+
+    pub fn get(self, name: &str) -> bool {
+        let mut s = self;
+        s.get_mut(name).is_some_and(|on| *on)
+    }
+
+    pub fn json(self) -> serde_json::Value {
+        serde_json::json!({"fillStroke": self.fill_stroke, "coloring": self.coloring, "drawMode": self.draw_mode, "screenMode": self.screen_mode})
+    }
 }
 
 /// The toolbars Edit Toolbar changed: each one is `None` while it is as it ships.
@@ -610,6 +677,7 @@ impl Default for UiState {
             slot_tool: Default::default(),
             floating_flyouts: vec![],
             toolbar_edits: ToolbarEdits::default(),
+            toolbar_show: ToolbarShow::default(),
             tools_drawer: false,
             floating_panels: vec![],
             docking: None,
@@ -621,6 +689,8 @@ impl Default for UiState {
             dock: true,
             view: ViewFlags::default(),
             dialog: None,
+            told: vec![],
+            answering_control: false,
             flyout: None,
             group_tool: vectorcraft_tools::TOOL_GROUPS.iter().map(|g| g[0].id.to_string()).collect(),
             status: String::new(),
@@ -644,6 +714,7 @@ impl Default for UiState {
             flattener_preview: Default::default(),
             color_guide_limit: String::new(),
             align_to: Default::default(),
+            color_mode: None,
             svg_options: Value::Null,
             place_link: true,
             dialog_file: None,

@@ -80,6 +80,7 @@ pub mod save_style_library;
 pub mod save_swatch_library;
 pub mod script_check;
 mod shapes;
+pub mod shortcut_import;
 pub mod slices;
 pub mod spot_colors;
 pub(crate) mod svg_options;
@@ -106,7 +107,8 @@ pub use effect::open as open_effect_dialog;
 pub use export_as::open as open_export_as;
 pub use export_for_screens::open as open_export_for_screens;
 pub(crate) use export_for_screens::{
-    KIND as EXPORT_FOR_SCREENS, formats as screen_formats, open_assets as open_export_for_screens_assets, saved_rows as screen_saved_rows,
+    KIND as EXPORT_FOR_SCREENS, formats as screen_formats, open_assets as open_export_for_screens_assets, saved_options as screen_saved_options,
+    saved_rows as screen_saved_rows,
 };
 pub(crate) use new_document::preset_name;
 pub use new_document::{open as open_new_document, preset_card};
@@ -304,6 +306,7 @@ registry! {
     LayerOptions: [layer_options::KIND] => layer_options::SPEC,
     LayersPanelOptions: [layers_panel_options::KIND] => layers_panel_options::SPEC,
     RearrangeArtboards: [rearrange_artboards::KIND] => rearrange_artboards::SPEC,
+    ShortcutImport: [shortcut_import::KIND] => DialogSpec::window(shortcut_import::show, shortcut_import::confirm),
 }
 
 /// The button labels the shared dialog frame can show (OK, discard and the fixed Cancel/Close),
@@ -332,11 +335,24 @@ fn run_and_close(app: &mut VectorcraftApp, id: &str, params: Value) -> DialogRes
     r
 }
 
-/// Close the open dialog as Cancel does, rolling back a live preview (`ui.dialog.cancel`).
+/// The field of a dialog opened over another (Import Shortcut Set over Keyboard Shortcuts) that
+/// holds the dialog under it, which Cancel and Escape show again.
+pub(crate) const PARENT: &str = "__parent";
+
+/// The dialog `d` was opened over, as it was.
+pub(crate) fn parent(d: &Dialog) -> Option<Dialog> {
+    d.fields.get(PARENT).and_then(|v| serde::Deserialize::deserialize(v).ok())
+}
+
+/// Close the open dialog as Cancel does, rolling back a live preview and showing the dialog it was
+/// opened over (`ui.dialog.cancel`).
 pub fn cancel(app: &mut VectorcraftApp) {
     missing_fonts::requeue_replaced(app);
-    if app.ui.dialog.take().is_some_and(|d| spec(&d.kind).preview) {
-        let _ = app.session.cancel_interaction();
+    if let Some(d) = app.ui.dialog.take() {
+        if spec(&d.kind).preview {
+            let _ = app.session.cancel_interaction();
+        }
+        app.ui.dialog = parent(&d);
     }
     settle(app);
 }
@@ -365,6 +381,7 @@ pub(crate) fn settle(app: &mut VectorcraftApp) {
 pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     about::show(app, ctx);
     settle(app);
+    confirm::show_waiting(app);
     // The kind of dialog shown last frame: a different one (or none) means this one just opened, and
     // its first field is to take the keyboard focus (`focus_id`, until a field takes it).
     let (shown_id, focus_id) = (egui::Id::new("dialog-shown"), egui::Id::new("dialog-focus-pending"));
@@ -539,3 +556,6 @@ mod tests_modal;
 
 #[cfg(test)]
 mod tests_rectangular_grid;
+
+#[cfg(test)]
+mod tests_shortcut_import;

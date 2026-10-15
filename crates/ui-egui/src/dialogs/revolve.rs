@@ -95,7 +95,7 @@ fn controls(app: &VectorcraftApp, ui: &mut egui::Ui, d: &mut Dialog) {
     for (key, name) in [("rotationX", tl!("Rotation X")), ("rotationY", tl!("Rotation Y")), ("rotationZ", tl!("Rotation Z"))] {
         number(ui, d, key, name, (-360.0, 360.0), "°", 1, None);
     }
-    number(ui, d, "perspective", tl!("Perspective"), (0.0, 100.0), "%", 1, None);
+    number(ui, d, "perspectiveAngle", tl!("Perspective"), (0.0, 160.0), "°", 1, None);
     ui.add_space(6.0);
     egui::CollapsingHeader::new(tl!("Advanced")).id_salt("revolve-advanced").show(ui, |ui| {
         number(ui, d, "segments", tl!("Segments"), (8.0, 128.0), "", 0, None);
@@ -231,7 +231,7 @@ fn view_controls(ui: &mut egui::Ui, d: &mut Dialog) {
     for (key, name) in [("rotationX", tl!("Rotation X")), ("rotationY", tl!("Rotation Y")), ("rotationZ", tl!("Rotation Z"))] {
         number(ui, d, key, name, (-180.0, 180.0), "°", 2, None);
     }
-    number(ui, d, "perspective", tl!("Perspective"), (0.0, 100.0), "%", 1, None);
+    number(ui, d, "perspectiveAngle", tl!("Perspective"), (0.0, 160.0), "°", 1, None);
 }
 
 /// A dropdown of `options` (value, label) for `key`, with its reset dot.
@@ -283,10 +283,13 @@ fn lighting_controls(ui: &mut egui::Ui, d: &mut Dialog) {
         }
     });
     ui.add_enabled_ui(d.bool("shade"), |ui| {
-        number(ui, d, "lightAzimuth", tl!("Direction"), (-360.0, 360.0), "°", 1, None);
-        number(ui, d, "lightElevation", tl!("Elevation"), (-90.0, 90.0), "°", 1, None);
+        // The documented Light Settings, in their order (one white light: no Color yet).
         number(ui, d, "lightIntensity", tl!("Intensity"), (0.0, 100.0), "%", 1, None);
-        number(ui, d, "ambient", tl!("Ambient"), (0.0, 100.0), "%", 1, None);
+        number(ui, d, "lightRotation", tl!("Rotation"), (-180.0, 180.0), "°", 1, None);
+        number(ui, d, "lightHeight", tl!("Height"), (0.0, 90.0), "°", 1, None);
+        number(ui, d, "lightSoftness", tl!("Softness"), (0.0, 100.0), "%", 1, None);
+        number(ui, d, "ambient", tl!("Ambient Light"), (0.0, 200.0), "%", 1, None);
+        toggle(ui, d, "lightBehind", tl!("Light behind the object"), false);
     });
 }
 

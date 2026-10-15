@@ -24,7 +24,7 @@ pub mod proof;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vectorcraft_doc::{AppearanceItem, Document, Node, NodeId, NodeKind, StrokeAlign, StrokeLayer, TextObject, TraceView};
+use vectorcraft_doc::{AppearanceItem, Document, Node, NodeId, NodeKind, StrokeAlign, StrokeLayer, SymbolBoxes, TextObject, TraceView};
 use vectorcraft_geom::{Affine, BezPath, FillRule, Rect, Shape};
 use vello_cpu::kurbo;
 use vello_cpu::peniko::{self, BlendMode, Compose, Mix};
@@ -43,9 +43,10 @@ pub use vectorcraft_effects as effects;
 pub use vello_cpu;
 
 /// Bounds of everything `n` paints, as the renderer culls it: its members, strokes, brush art and
-/// geometry effects, and the shadows and glows of it and its members.
-pub fn painted_bounds(n: &Node) -> Option<Rect> {
-    brush_fx::cull_bounds(n)
+/// geometry effects, and the shadows and glows of it and its members. Symbol instances are
+/// measured by their art in `doc` ([`Node::visual_bounds_with`]).
+pub fn painted_bounds(doc: &Document, n: &Node) -> Option<Rect> {
+    brush_fx::cull_bounds(&doc.symbol_boxes(), n)
 }
 
 /// Largest raster an export may ask [`Renderer::render_region`] for, per side. The CPU rasteriser
@@ -82,7 +83,8 @@ pub struct RenderOptions {
     pub artboards: bool,
     /// Objects not to draw (e.g. the object being edited by a live drag preview).
     pub hidden: Vec<NodeId>,
-    /// Draw template layers dimmed (50%).
+    /// Draw the layers as their Layer Options show them on screen: Preview off in outline, Dim
+    /// Images fading their images (a template layer's too), a template in Preview in Outline view.
     pub dim_templates: bool,
     /// Soft proof / separations preview (see [`proof`]).
     pub proof: Option<proof::ProofSetup>,
@@ -364,6 +366,10 @@ struct GeomEntry {
 type ClipEntry = (Arc<Node>, Option<Arc<(BezPath, FillRule)>>);
 /// A clipping path (kept alive) and what it paints: its fills and its strokes ([`Node::clip_paint`]).
 type ClipPaintEntry = (Arc<Node>, Option<Arc<Node>>, Option<Arc<Node>>);
+/// An object with effects (kept alive), the art drawn for it ([`Renderer::fx_art`]), and, when that
+/// art can be made from evaluated live objects (`fx::evaluates_live`), the inputs of their
+/// evaluation ([`live::Found`]).
+type FxArtEntry = (Arc<Node>, Arc<Node>, Option<live::Found>);
 /// What symbol art placed by [`Renderer::placed_art`] is kept under: the art's address, the bits
 /// of the transform's coefficients, whether strokes scale with it, and the stain ([`stain_bits`]).
 type PlacedKey = (usize, [u64; 6], bool, [u32; 6]);
@@ -395,12 +401,24 @@ pub struct Renderer {
     /// Worker threads for the multithreaded rasterizer (0 = single-threaded).
     pub threads: u16,
     geom: PtrMap<usize, GeomEntry>,
-    /// Expanded stroke outlines keyed by (stroke layer address, width bits, tolerance level):
-    /// panning re-renders reuse them instead of re-expanding every stroke.
-    strokes: PtrMap<(usize, u64, i32), StrokeEntry>,
+    /// The symbols (name and art) of the document last drawn, which `geom`'s bounds measured
+    /// symbol instances by (see [`Self::check_symbols`]). The art is held weakly: the reference
+    /// keeps the art's allocation, so no other art can get its address, and does not keep the
+    /// art's content.
+    symbols: Vec<(String, std::sync::Weak<Node>)>,
+    /// Expanded stroke outlines keyed by ([`Self::stroke_owner`], stroke layer address, width bits,
+    /// tolerance level): panning re-renders reuse them instead of re-expanding every stroke.
+    strokes: PtrMap<(usize, usize, u64, i32), StrokeEntry>,
     /// The node being drawn on the plain-path fast path (owner of cached stroke outlines).
     cur: Option<Arc<Node>>,
+    /// Whether the art being drawn is made again in every frame: symbol art that
+    /// [`Self::placed_art`] did not keep, and evaluations of live objects and effect art that their
+    /// caches did not keep.
+    made_again: bool,
     /// The node `draw_shape_fx` may cache the live-effect geometry of (the one `draw_arc` is drawing).
+    /// In Outline view its path comes from `geom` too ([`Self::outline_path`]), and
+    /// [`Self::draw_outline_member`] sets it to each member of a clip group or shape of an Image
+    /// Trace object that it draws.
     fx_owner: Option<Arc<Node>>,
     /// Live-effect geometry per node ([`fx::FxGeom`]), keyed by `Arc` identity like `geom`.
     fx_geom: PtrMap<usize, fx::FxGeom>,
@@ -423,13 +441,17 @@ pub struct Renderer {
     /// What the contents of those rasters read from the document, and the color settings, as last
     /// found for a frame (`stamp`) and document (address) (see [`Self::doc_inputs`]).
     doc_inputs: Option<((u64, usize), Arc<fx::DocInputs>)>,
+    /// Whether a document's layers, symbol art and pattern art show transparency, as last found
+    /// (see [`Self::blends_in_cmyk`]), with that art in order, held weakly: a weak reference keeps
+    /// the allocation, so no other art gets one of those addresses while the answer is kept.
+    transparency: Option<(Vec<std::sync::Weak<Node>>, bool)>,
     /// Whether the group being drawn is a knockout group (what its neutral children inherit).
     knockout: bool,
     /// Address of the knockout-group element being drawn as its knockout shape: at full object
     /// opacity and without its opacity mask (see [`Self::draw_knockout`]); 0 = none.
     shape_of: usize,
     /// The art drawn for objects with effects that apply through it (see `fx::has_object_fx`).
-    fx_arts: FrameCache<usize, (Arc<Node>, Arc<Node>)>,
+    fx_arts: FrameCache<usize, FxArtEntry>,
     /// Symbol art as instances and inline graphics draw it (see [`Self::placed_art`]).
     placed_arts: FrameCache<PlacedKey, PlacedEntry>,
     /// Layers open around the drawing point in the current context: a non-isolated group can copy
@@ -443,10 +465,14 @@ pub struct Renderer {
     /// Clip paths pushed on the current context (path, rule, transform): starting the context
     /// again from a picture of it pushes them again (see [`Self::group`]).
     clip_paths: Vec<(BezPath, FillRule, Affine)>,
+    /// The picture [`Self::flatten`] started the current context again from, with 8-bit
+    /// compositing: [`Self::finish`] renders the context over it.
+    picture: Option<Arc<Pixmap>>,
     /// What clipping paths paint, per clipping path (see [`Self::clip_paint_of`]).
     clip_paints: FrameCache<usize, ClipPaintEntry>,
-    /// Gradients along or across strokes, keyed like `strokes` (see [`Self::fill_path_gradient`]).
-    stroke_slices: PtrMap<(usize, i32), SliceEntry>,
+    /// Gradients along or across strokes (see [`Self::fill_path_gradient`]), keyed by
+    /// ([`Self::stroke_owner`], stroke layer address, tolerance level).
+    stroke_slices: PtrMap<(usize, usize, i32), SliceEntry>,
     /// What the image keys colour adjustments give their recoloured images name: the image
     /// recoloured and the adjustment, with its hash (see [`Self::adjusted_image`]).
     adjusts: HashMap<String, (String, u64, vectorcraft_effects::ColorMap)>,
@@ -464,6 +490,9 @@ pub struct Renderer {
     isolation: Option<(u64, usize, NodeId, Vec<NodeId>)>,
     /// Drawing inside the isolated container or a dimmed object: nothing further dims.
     isolation_settled: bool,
+    /// The art the last frame drew with Overprint Preview or Separations Preview: the next frame
+    /// draws it again for the objects that have not changed ([`proof::prepare`]).
+    proof_art: Option<proof::Prepared>,
 }
 
 /// How deep inline graphics nest (text in a symbol shown inline in text…) before they draw nothing.
@@ -479,6 +508,9 @@ pub struct FrameStats {
     /// The drop shadows, outer glows and filtered contents the frame drew from rasters made before
     /// their object moved, or made over such rasters ([`RenderOptions::interacting`]).
     pub moved: usize,
+    /// How many threads composed the frame from its two ink planes, in a CMYK document that shows
+    /// transparency; 0 for other frames.
+    pub ink_threads: usize,
     pub micros: u64,
 }
 
@@ -493,6 +525,8 @@ struct Frame<'a> {
     /// Drawing into a multithreaded context: vello filter layers must be rendered offscreen.
     mt: bool,
     doc: &'a Document,
+    /// `doc`'s symbol art boxes, which culling measures symbol instances by ([`SymbolBoxes::quick`]).
+    symbols: &'a SymbolBoxes<'a>,
     view: Affine,
     /// Visible region in document coordinates (for culling).
     visible: Rect,
@@ -527,8 +561,10 @@ impl Renderer {
             ctx_st: None,
             threads: default_threads(),
             geom: PtrMap::default(),
+            symbols: vec![],
             strokes: PtrMap::default(),
             cur: None,
+            made_again: false,
             fx_owner: None,
             fx_geom: PtrMap::default(),
             stamp: 0,
@@ -540,6 +576,7 @@ impl Renderer {
             shadows: PtrMap::default(),
             pixel_fx: PtrMap::default(),
             doc_inputs: None,
+            transparency: None,
             live: live::LiveCache::default(),
             knockout: false,
             shape_of: 0,
@@ -549,6 +586,7 @@ impl Renderer {
             backdrop: None,
             blends: PtrMap::default(),
             clip_paths: vec![],
+            picture: None,
             clip_paints: FrameCache::new(lru::CLIP_BUDGET, 256),
             stroke_slices: PtrMap::default(),
             adjusts: HashMap::new(),
@@ -557,6 +595,7 @@ impl Renderer {
             raster: vello_cpu::RasterizerSettings::default(),
             isolation: None,
             isolation_settled: false,
+            proof_art: None,
         }
     }
 
@@ -579,7 +618,9 @@ impl Renderer {
                 return Rendered { width: w, height: h, pixels };
             }
         }
-        let prepared = proof::prepare(doc, opts);
+        // The document's own symbols: proofing rewrites the colors and blend modes of their art.
+        self.check_symbols(doc);
+        let prepared = proof::prepare(doc, opts, &mut self.proof_art);
         let doc: &Document = &prepared;
         let w = width.clamp(1, u16::MAX as u32) as u16;
         let h = height.clamp(1, u16::MAX as u32) as u16;
@@ -591,7 +632,8 @@ impl Renderer {
         let visible = inv.transform_rect_bbox(Rect::new(0.0, 0.0, w as f64, h as f64));
         let px = 1.0 / view.determinant().abs().sqrt().max(1e-12);
         let screen = if opts.rich_black { Ink::RichBlack } else { Ink::Display };
-        let frame = Frame { mt: threads > 0, doc, view, visible, px, opts, ink: screen };
+        let symbols = doc.symbol_boxes().quick();
+        let frame = Frame { mt: threads > 0, doc, symbols: &symbols, view, visible, px, opts, ink: screen };
         self.begin_frame();
         // View Opacity Mask: the mask's coverage in greyscale instead of the artwork.
         if let Some(m) = opts.mask_view.and_then(|id| doc.node(id)).and_then(|n| n.extras().mask.as_deref()) {
@@ -600,13 +642,19 @@ impl Renderer {
             self.stats.micros = now().saturating_sub(start);
             return Rendered { width: w as u32, height: h as u32, pixels };
         }
-        let mut pixels = if inks || ink::blends_in_cmyk(doc, opts) {
+        let mut pixels = if inks || self.blends_in_cmyk(doc, opts) {
             // Blending in CMYK: one frame per ink plane, then their inks shown on screen.
             let cmy = self.draw_frame(&Frame { ink: Ink::Cmy, ..frame }, w, h);
             let stats = self.stats;
             let k = self.draw_frame(&Frame { ink: Ink::K, ..frame }, w, h);
             self.stats = stats;
-            if inks { ink::amounts(&cmy, &k) } else { ink::compose(&cmy, &k, opts) }
+            if inks {
+                ink::amounts(&cmy, &k)
+            } else {
+                let (pixels, composed) = ink::compose(&cmy, &k, opts, threads);
+                self.stats.ink_threads = composed;
+                pixels
+            }
         } else {
             self.draw_frame(&frame, w, h)
         };
@@ -681,7 +729,7 @@ impl Renderer {
                 ctx.fill_rect(&ab.rect);
             }
         }
-        (self.nested, self.backdrop) = (0, None);
+        (self.nested, self.backdrop, self.picture) = (0, None, None);
         self.clip_paths.clear();
         if opts.trim && !f.doc.artboards.is_empty() {
             let mut clip = BezPath::new();
@@ -694,9 +742,7 @@ impl Renderer {
         } else {
             self.draw_page(&mut ctx, f);
         }
-        ctx.flush();
-        let mut pm = Pixmap::new(w, h);
-        ctx.render_with(&mut pm, &mut self.resources, self.raster);
+        let pm = self.finish(&mut ctx, self.raster);
         if threads == 0 {
             self.ctx_st = Some(ctx);
         } else {
@@ -762,25 +808,26 @@ impl Renderer {
 
     /// Render node `n` of `doc` (its resources) into `w`×`h` transparent pixels through `view`.
     pub fn render_node(&mut self, doc: &Document, n: &Arc<Node>, w: u16, h: u16, view: Affine) -> Option<Rendered> {
+        self.check_symbols(doc);
         let inv = view.inverse();
         let visible = inv.transform_rect_bbox(Rect::new(0.0, 0.0, w as f64, h as f64));
         let px = 1.0 / view.determinant().abs().sqrt().max(1e-12);
         let mut ctx = single_threaded_context(w, h);
         let opts = RenderOptions::default();
-        let frame = Frame { mt: false, doc, view, visible, px, opts: &opts, ink: Ink::Display };
+        let symbols = doc.symbol_boxes().quick();
+        let frame = Frame { mt: false, doc, symbols: &symbols, view, visible, px, opts: &opts, ink: Ink::Display };
         self.begin_frame();
-        (self.knockout, self.nested, self.backdrop) = (false, 0, None);
+        (self.knockout, self.nested, self.backdrop, self.picture) = (false, 0, None, None);
         self.clip_paths.clear();
         self.draw_arc(&mut ctx, &frame, n);
-        ctx.flush();
-        let mut pm = Pixmap::new(w, h);
-        ctx.render(&mut pm, &mut self.resources);
+        let pm = self.finish(&mut ctx, vello_cpu::RasterizerSettings::default());
         self.end_frame();
         Some(Rendered { width: w as u32, height: h as u32, pixels: pm.data_as_u8_slice().to_vec() })
     }
 
     /// Render any node (also one outside the tree, e.g. opacity-mask art) fitted into
-    /// `size`×`size` pixels, optionally over a solid premultiplied background.
+    /// `size`×`size` pixels, optionally over a solid premultiplied background. A symbol instance
+    /// is fitted by its symbol's art in `doc`.
     pub fn render_node_thumbnail(&mut self, doc: &Document, n: &Node, size: u32, background: Option<[u8; 4]>) -> Option<Rendered> {
         self.render_node_thumbnail_with(doc, n, size, background, &RenderOptions::default())
     }
@@ -799,7 +846,8 @@ impl Renderer {
         background: Option<[u8; 4]>,
         opts: &RenderOptions,
     ) -> Option<Rendered> {
-        let b = brush_fx::cull_bounds(n)?;
+        self.check_symbols(doc);
+        let b = brush_fx::cull_bounds(&doc.symbol_boxes(), n)?;
         let s = (size as f64 - 2.0) / b.width().max(b.height()).max(1e-6);
         let view = Affine::translate((size as f64 / 2.0, size as f64 / 2.0)) * Affine::scale(s) * Affine::translate(-b.center().to_vec2());
         let w = size.clamp(1, u16::MAX as u32) as u16;
@@ -808,20 +856,20 @@ impl Renderer {
             ctx.set_paint(peniko::Color::from_rgba8(bg[0], bg[1], bg[2], bg[3]));
             ctx.fill_rect(&kurbo::Rect::new(0.0, 0.0, w as f64, w as f64));
         }
-        let frame = Frame { mt: false, doc, view, visible: b.inflate(1.0, 1.0), px: 1.0 / s, opts, ink: Ink::Display };
+        let symbols = doc.symbol_boxes().quick();
+        let frame = Frame { mt: false, doc, symbols: &symbols, view, visible: b.inflate(1.0, 1.0), px: 1.0 / s, opts, ink: Ink::Display };
         self.begin_frame();
-        (self.knockout, self.nested, self.backdrop) = (false, 0, None);
+        (self.knockout, self.nested, self.backdrop, self.picture) = (false, 0, None, None);
         self.clip_paths.clear();
         self.draw_node(&mut ctx, &frame, n, true);
-        ctx.flush();
-        let mut pm = Pixmap::new(w, w);
-        ctx.render(&mut pm, &mut self.resources);
+        let pm = self.finish(&mut ctx, vello_cpu::RasterizerSettings::default());
         self.end_frame();
         Some(Rendered { width: size, height: size, pixels: pm.data_as_u8_slice().to_vec() })
     }
 
-    /// Cached cull bounds of a node (containers union their cached children).
-    fn bounds_of(&mut self, a: &Arc<Node>) -> Option<Rect> {
+    /// Cached cull bounds of a node (containers union their cached children), symbol instances
+    /// measured by their art box from `symbols`.
+    fn bounds_of(&mut self, symbols: &SymbolBoxes, a: &Arc<Node>) -> Option<Rect> {
         let key = Arc::as_ptr(a) as usize;
         if let Some(e) = self.geom.get_mut(&key)
             && Arc::ptr_eq(&e.node, a)
@@ -836,15 +884,27 @@ impl Renderer {
                 let source = a.extras().trace.is_some().then(|| children.first()).flatten();
                 for c in children {
                     if c.visible || source.is_some_and(|s| Arc::ptr_eq(s, c)) {
-                        acc = vectorcraft_geom::union_opt(acc, self.bounds_of(c));
+                        acc = vectorcraft_geom::union_opt(acc, self.bounds_of(symbols, c));
                     }
                 }
                 acc
             }
-            _ => brush_fx::cull_bounds(a),
+            _ => brush_fx::cull_bounds(symbols, a),
         };
         self.geom.insert(key, GeomEntry { node: a.clone(), bounds: b, path: None, stamp: self.stamp });
         b
+    }
+
+    /// Drop the cached bounds of symbol instances and of the objects that hold them when `doc`'s
+    /// symbols are not those of the document last drawn (by name and art): those bounds measured
+    /// the instances by their symbol's art.
+    fn check_symbols(&mut self, doc: &Document) {
+        let same = self.symbols.len() == doc.symbols.len()
+            && self.symbols.iter().zip(&doc.symbols).all(|((name, art), s)| *name == s.name && std::ptr::eq(art.as_ptr(), Arc::as_ptr(&s.art)));
+        if !same {
+            self.geom.retain(|_, e| !holds_instance(&e.node));
+            self.symbols = doc.symbols.iter().map(|s| (s.name.clone(), Arc::downgrade(&s.art))).collect();
+        }
     }
 
     /// Cached region a clip group's clipping path `a` clips to ([`effects::clip_outline`]):
@@ -878,8 +938,9 @@ impl Renderer {
         (fill, stroke)
     }
 
-    /// Cached BezPath of a path node.
-    fn path_of(&mut self, a: &Arc<Node>) -> Option<Arc<BezPath>> {
+    /// Cached BezPath of a path or compound path node (its bounds cached with it, see
+    /// [`Self::bounds_of`]).
+    fn path_of(&mut self, symbols: &SymbolBoxes, a: &Arc<Node>) -> Option<Arc<BezPath>> {
         let key = Arc::as_ptr(a) as usize;
         if let Some(e) = self.geom.get(&key)
             && Arc::ptr_eq(&e.node, a)
@@ -887,10 +948,17 @@ impl Renderer {
         {
             return Some(p.clone());
         }
-        let p = Arc::new(a.path_data()?.to_bezpath());
-        let bounds = self.bounds_of(a);
+        let p = Arc::new(a.stroke_path()?);
+        let bounds = self.bounds_of(symbols, a);
         self.geom.insert(key, GeomEntry { node: a.clone(), bounds, path: Some(p.clone()), stamp: self.stamp });
         Some(p)
+    }
+
+    /// The cached path of path or compound path `n` ([`Self::path_of`]) when the frame is in
+    /// Outline view and `n` is `fx_owner`, else `None`.
+    fn outline_path(&mut self, f: &Frame, n: &Node) -> Option<Arc<BezPath>> {
+        let owner = self.fx_owner.as_ref().filter(|o| f.opts.outline && std::ptr::eq(&***o, n)).cloned()?;
+        self.path_of(f.symbols, &owner)
     }
 
     /// Whether `a` is left out of this frame: hidden, a skipped template or guide, or culled.
@@ -899,7 +967,7 @@ impl Renderer {
         if !a.visible || skipped_template || f.opts.hidden.contains(&a.id) {
             return true;
         }
-        match self.bounds_of(a) {
+        match self.bounds_of(f.symbols, a) {
             Some(b) => {
                 let pad = f.px * 2.0;
                 // Level of detail: leaves smaller than a quarter pixel are invisible.
@@ -924,7 +992,7 @@ impl Renderer {
             // A masked object is a non-isolated group of its own.
             let mask = Some(self.opacity_mask(f, m, ctx.width(), ctx.height()));
             let blends = a.blend != vectorcraft_color::BlendMode::Normal || (!a.isolate && self.blends_through(a));
-            let bounds = if blends { self.bounds_of(a) } else { None };
+            let bounds = if blends { self.bounds_of(f.symbols, a) } else { None };
             self.group(ctx, f, Composite { mask, blends, bounds, ..Default::default() }, &mut |r, c, fr| r.draw_arc_body(c, fr, a));
             return;
         }
@@ -942,13 +1010,16 @@ impl Renderer {
         let mut mctx = f.offscreen_context(w, h);
         // Mask art is a picture of its own: it takes no part in a knockout group around the object,
         // and its luminance is that of its screen colours.
-        let outer =
-            (std::mem::take(&mut self.knockout), std::mem::take(&mut self.nested), self.backdrop.take(), std::mem::take(&mut self.clip_paths));
+        let outer = (
+            std::mem::take(&mut self.knockout),
+            std::mem::take(&mut self.nested),
+            self.backdrop.take(),
+            std::mem::take(&mut self.clip_paths),
+            self.picture.take(),
+        );
         self.draw_node(&mut mctx, &Frame { mt: false, ink: Ink::Display, ..*f }, &m.art, true);
-        (self.knockout, self.nested, self.backdrop, self.clip_paths) = outer;
-        mctx.flush();
-        let mut pm = Pixmap::new(w, h);
-        mctx.render_with(&mut pm, &mut self.resources, self.raster);
+        let pm = self.finish(&mut mctx, self.raster);
+        (self.knockout, self.nested, self.backdrop, self.clip_paths, self.picture) = outer;
         pm.data().iter().map(|p| mask_value(p.r, p.g, p.b, p.a, m.clip, m.invert)).collect()
     }
 
@@ -964,7 +1035,7 @@ impl Renderer {
             && !a.isolate
             && !fx::has_fx(a)
             && (self.opacity_of(a) >= 1.0 || painted_items(a) == 1)
-            && let Some(bp) = self.path_of(a)
+            && let Some(bp) = self.path_of(f.symbols, a)
         {
             self.alpha = self.opacity_of(a).clamp(0.0, 1.0);
             self.cur = Some(a.clone());
@@ -1012,7 +1083,7 @@ impl Renderer {
         }
         if force {
             // Bounds were already checked by draw_arc (or the caller wants it drawn regardless).
-        } else if let Some(b) = fx::cull_bounds(n) {
+        } else if let Some(b) = fx::cull_bounds(f.symbols, n) {
             let pad = f.px * 2.0;
             if !rects_overlap(b.inflate(pad, pad), f.visible) {
                 self.stats.culled += n.count();
@@ -1022,8 +1093,8 @@ impl Renderer {
             return;
         }
         // Layer Options on screen: a layer whose Preview is off draws in outline, and Dim Images
-        // fades its images (exports and thumbnails, which leave templates out, ignore both).
-        // (A template is dimmed as a whole already.)
+        // fades its images, a template's too (exports and thumbnails, which leave templates out,
+        // ignore both).
         if let NodeKind::Layer { preview, dim_images, template, .. } = &n.kind
             && f.opts.dim_templates
             && !f.opts.skip_templates
@@ -1038,7 +1109,7 @@ impl Renderer {
                 let opts = RenderOptions { outline: true, ..f.opts.clone() };
                 return self.draw_node(ctx, &Frame { opts: &opts, ..*f }, n, force);
             }
-            if let Some(p) = dim_images.filter(|_| !template) {
+            if let Some(p) = *dim_images {
                 let outer = self.dim_images;
                 let dim = f32::from(p).clamp(0.0, 100.0) / 100.0;
                 self.dim_images = Some(outer.map_or(dim, |o| o.min(dim)));
@@ -1096,14 +1167,13 @@ impl Renderer {
             return self.draw_object_fx(ctx, f, &Arc::new(n.clone()), false);
         }
         let outline = f.opts.outline;
-        let template_dim = matches!(n.kind, NodeKind::Layer { template: true, .. }) && f.opts.dim_templates;
-        let opacity = if template_dim { self.opacity_of(n) * 0.5 } else { self.opacity_of(n) };
+        let opacity = self.opacity_of(n);
         // Whether this container's children knock each other out.
         let knockout = !outline && n.knocks_out(self.knockout);
         let enclosing = std::mem::replace(&mut self.knockout, knockout);
         if !outline && (opacity < 1.0 || n.blend != vectorcraft_color::BlendMode::Normal || n.isolate || knockout) {
             let blends = self.blends_through(n);
-            let bounds = if blends { self.node_bounds(n) } else { None };
+            let bounds = if blends { self.node_bounds(f.symbols, n) } else { None };
             let comp = Composite { blend: n.blend, opacity, isolated: n.isolate, blends, bounds, ..Default::default() };
             self.group(ctx, f, comp, &mut |r, c, fr| r.draw_content(c, fr, n, knockout));
         } else {
@@ -1124,7 +1194,7 @@ impl Renderer {
             }
             NodeKind::Group { children, clip: true } | NodeKind::Layer { children, clip: true, .. } if f.opts.outline => {
                 for c in children {
-                    self.draw_node(ctx, f, c, false);
+                    self.draw_outline_member(ctx, f, c);
                 }
             }
             NodeKind::Group { children, clip: true } | NodeKind::Layer { children, clip: true, .. } => {
@@ -1160,11 +1230,11 @@ impl Renderer {
                 }
             }
             NodeKind::Path { path, rule, guide, .. } => {
-                let bp = path.to_bezpath();
+                let bp = self.outline_path(f, n).unwrap_or_else(|| Arc::new(path.to_bezpath()));
                 if *guide {
                     let ([r, g, b], dots) = f.opts.guide;
                     if dots {
-                        let mut screen = bp.clone();
+                        let mut screen = BezPath::clone(&bp);
                         screen.apply_affine(f.view);
                         ctx.set_transform(Affine::IDENTITY);
                         ctx.set_stroke(kurbo::Stroke::new(1.5).with_dashes(0.0, [1.5, 2.5]));
@@ -1178,6 +1248,9 @@ impl Renderer {
                 }
             }
             NodeKind::Compound { children, rule } => {
+                if let Some(bp) = self.outline_path(f, n) {
+                    return self.draw_shape(ctx, f, n, &bp, *rule);
+                }
                 let mut bp = BezPath::new();
                 for c in children {
                     if let Some(p) = c.path_data() {
@@ -1190,8 +1263,10 @@ impl Renderer {
             NodeKind::Image(im) => self.draw_image(ctx, f, im),
             NodeKind::SymbolInstance { symbol, xf } => {
                 if let Some(sym) = f.doc.symbols.iter().find(|s| &s.name == symbol) {
-                    let art = self.placed_art(&sym.art, *xf, false, Some(n));
+                    let (art, kept) = self.placed_art(&sym.art, *xf, false, Some(n));
+                    let outer = std::mem::replace(&mut self.made_again, !kept);
                     self.draw_node(ctx, f, &art, true);
+                    self.made_again = outer;
                 }
             }
             NodeKind::Blend { .. } | NodeKind::Envelope { .. } | NodeKind::Mesh(_) | NodeKind::Repeat(_) | NodeKind::PlacedDocument(_) => {
@@ -1214,9 +1289,32 @@ impl Renderer {
             let opts = RenderOptions { outline: true, ..f.opts.clone() };
             let frame = Frame { opts: &opts, ..*f };
             for c in shapes {
-                self.draw_node(ctx, &frame, c, false);
+                self.draw_outline_member(ctx, &frame, c);
             }
         }
+    }
+
+    /// [`Self::draw_node`] for `c`, a member of a clip group or a shape of an Image Trace object in
+    /// Outline view, culled by its cached bounds ([`Self::bounds_of`]) and drawn with `c` as
+    /// `fx_owner`, so its path and live-effect geometry come from the caches.
+    fn draw_outline_member(&mut self, ctx: &mut RenderContext, f: &Frame, c: &Arc<Node>) {
+        if !c.visible || f.opts.hidden.contains(&c.id) {
+            return;
+        }
+        match self.bounds_of(f.symbols, c) {
+            Some(b) => {
+                let pad = f.px * 2.0;
+                if !rects_overlap(b.inflate(pad, pad), f.visible) {
+                    self.stats.culled += c.count();
+                    return;
+                }
+            }
+            None if !c.is_container() => return,
+            None => {}
+        }
+        let outer = self.fx_owner.replace(c.clone());
+        self.draw_node(ctx, f, c, true);
+        self.fx_owner = outer;
     }
 
     /// The children of a group: as the elements of a knockout group when `knockout`.
@@ -1246,12 +1344,13 @@ impl Renderer {
         }
     }
 
-    /// Cull bounds of `n`: cached when it is a node of the tree being drawn.
-    fn node_bounds(&mut self, n: &Node) -> Option<Rect> {
+    /// Cull bounds of `n` (symbol instances measured by their art box from `symbols`): cached when
+    /// it is a node of the tree being drawn.
+    fn node_bounds(&mut self, symbols: &SymbolBoxes, n: &Node) -> Option<Rect> {
         match self.geom.get(&(n as *const Node as usize)) {
             // The entry keeps its node alive, so the address is that node's.
             Some(e) if std::ptr::eq(Arc::as_ptr(&e.node), n) => e.bounds,
-            _ => fx::cull_bounds(n),
+            _ => fx::cull_bounds(symbols, n),
         }
     }
 
@@ -1443,7 +1542,7 @@ impl Renderer {
         };
         let slices = match self.cur.clone() {
             Some(node) => {
-                let key = (st as *const StrokeLayer as usize, level);
+                let key = (self.stroke_owner(&node), st as *const StrokeLayer as usize, level);
                 match self.stroke_slices.get_mut(&key) {
                     Some(e) if Arc::ptr_eq(&e.node, &node) => {
                         e.stamp = self.stamp;
@@ -1481,13 +1580,13 @@ impl Renderer {
     }
 
     /// The line part of a stroke of the fast-path node `self.cur` (see
-    /// [`effects::stroke::line_outline`]), cached across frames. The tolerance (vello's 0.25
-    /// device px) is bucketed to powers of two, never coarser than needed, so zooming reuses
-    /// outlines until the level changes.
+    /// [`effects::stroke::line_outline`]), cached across frames under [`Self::stroke_owner`] and
+    /// the stroke layer. The tolerance (vello's 0.25 device px) is bucketed to powers of two, never
+    /// coarser than needed, so zooming reuses outlines until the level changes.
     fn cached_stroke(&mut self, f: &Frame, line: &BezPath, st: &StrokeLayer, width: f64) -> Option<Arc<BezPath>> {
         let node = self.cur.clone()?;
         let level = (f.px * 0.25).log2().floor() as i32;
-        let key = (st as *const StrokeLayer as usize, width.to_bits(), level);
+        let key = (self.stroke_owner(&node), st as *const StrokeLayer as usize, width.to_bits(), level);
         if let Some(e) = self.strokes.get_mut(&key)
             && Arc::ptr_eq(&e.node, &node)
         {
@@ -1499,9 +1598,22 @@ impl Renderer {
         Some(outline)
     }
 
+    /// What the `strokes` and `stroke_slices` keys hold for the fast-path node `node`: its address,
+    /// or 0 while art made again in every frame is drawn ([`Self::made_again`]).
+    fn stroke_owner(&self, node: &Arc<Node>) -> usize {
+        if self.made_again { 0 } else { Arc::as_ptr(node) as usize }
+    }
+
     fn draw_text(&mut self, ctx: &mut RenderContext, f: &Frame, n: &Node, t: &TextObject) {
         let t = &*f.doc.inline_resolved(t);
-        let g = text_geom_snapped(t, f.text_snap(t));
+        // Type drawn as `fx_owner` (the node `draw_arc` is drawing, or type art that `fx_arts`
+        // keeps, see `draw_fx_art`) takes its glyph geometry from `texts`, as on the fast path,
+        // except in frames that snap type to pixels.
+        let owner = self.fx_owner.as_ref().filter(|o| std::ptr::eq(&***o, n)).cloned();
+        let g = match (f.text_snap(t), owner) {
+            (None, Some(a)) => self.text_geom_of(&a, t),
+            (snap, _) => Arc::new(text_geom_snapped(t, snap)),
+        };
         self.draw_text_geom(ctx, f, n, t, &g);
     }
 
@@ -1525,23 +1637,26 @@ impl Renderer {
             let Some(art) = t.runs.get(ig.run).and_then(|r| r.inline.as_ref()) else { continue };
             let Some(sym) = f.doc.symbols.iter().find(|s| s.name == art.symbol) else { continue };
             // Strokes scale with the art (it is sized to the type, as in the SVG `<use>`).
-            let node = self.placed_art(&sym.art, t.xf * ig.xf * f.doc.symbol_natural_xf(&art.symbol), true, None);
+            let (node, kept) = self.placed_art(&sym.art, t.xf * ig.xf * f.doc.symbol_natural_xf(&art.symbol), true, None);
+            let outer = std::mem::replace(&mut self.made_again, !kept);
             self.draw_node(ctx, f, &node, true);
+            self.made_again = outer;
         }
         self.inline_depth -= 1;
     }
 
-    /// Symbol art `art` as an instance or an inline graphic draws it ([`place`]). Art that is a
-    /// group or a layer without an appearance of its own is kept between frames under the art's
-    /// `Arc`, `xf`, `scale_strokes` and the stain of instance `inst`: its members keep their `Arc`s
-    /// from frame to frame, and the caches keyed by a node's address (geometry, glyphs, live-effect
-    /// geometry) hit for them. Other art is placed again in every frame, and so is art that holds
-    /// symbol instances, type with inline graphics, images, placed documents, live blends,
-    /// envelopes or repeats, or raster effects ([`depends_on_document`]). Art that holds type is
+    /// Symbol art `art` as an instance or an inline graphic draws it ([`place`]), and whether it is
+    /// kept. Art that is a group or a layer without an appearance of its own is kept between frames
+    /// under the art's `Arc`, `xf`, `scale_strokes` and the stain of instance `inst`: its members
+    /// keep their `Arc`s from frame to frame, and the caches keyed by a node's address (geometry,
+    /// stroke outlines, glyphs, live-effect geometry) hit for them. Other art is placed again in
+    /// every frame, and so is art that holds symbol instances, type with inline graphics, images,
+    /// placed documents, live blends, envelopes or repeats, or raster effects
+    /// ([`depends_on_document`]), and art that the cache has no room for. Art that holds type is
     /// placed again when the fonts change.
-    fn placed_art(&mut self, art: &Arc<Node>, xf: Affine, scale_strokes: bool, inst: Option<&Node>) -> Arc<Node> {
+    fn placed_art(&mut self, art: &Arc<Node>, xf: Affine, scale_strokes: bool, inst: Option<&Node>) -> (Arc<Node>, bool) {
         if !matches!(art.kind, NodeKind::Group { .. } | NodeKind::Layer { .. }) || fx::has_object_fx(art) {
-            return place(art, xf, scale_strokes, inst);
+            return (place(art, xf, scale_strokes, inst), false);
         }
         let stain = stain_bits(inst.and_then(vectorcraft_brush::stain));
         let key = (Arc::as_ptr(art) as usize, xf.as_coeffs().map(f64::to_bits), scale_strokes, stain);
@@ -1550,22 +1665,28 @@ impl Renderer {
             && e.fonts.is_none_or(|g| g == vectorcraft_text::FontDb::global().generation())
         {
             return match &e.placed {
-                Some(placed) => placed.clone(),
-                None => place(art, xf, scale_strokes, inst),
+                Some(placed) => (placed.clone(), true),
+                None => (place(art, xf, scale_strokes, inst), false),
             };
         }
         let placed = place(art, xf, scale_strokes, inst);
         let kept = (!depends_on_document(art)).then(|| placed.clone());
-        let fonts = (kept.is_some() && holds_type(art)).then(|| vectorcraft_text::FontDb::global().generation());
+        let keeps = kept.is_some();
+        let fonts = (keeps && holds_type(art)).then(|| vectorcraft_text::FontDb::global().generation());
         // The bytes count the key and the entry, the art's allocation that the weak reference
         // keeps, and the kept art.
         let bytes = size_of::<(PlacedKey, PlacedEntry, Node)>() + kept.as_deref().map_or(0, lru::node_bytes);
-        self.placed_arts.insert(key, PlacedEntry { art: Arc::downgrade(art), placed: kept, fonts }, bytes, self.stamp);
-        placed
+        let inserted = self.placed_arts.insert(key, PlacedEntry { art: Arc::downgrade(art), placed: kept, fonts }, bytes, self.stamp);
+        (placed, keeps && inserted)
     }
 
     /// Cached glyph geometry for a text node (keyed by Arc identity like paths).
+    /// Text `t` that is not the node's own, such as the copy whose inline graphics
+    /// `Document::inline_resolved` sized again, is laid out without the cache.
     fn text_geom_of(&mut self, a: &Arc<Node>, t: &TextObject) -> Arc<TextGeom> {
+        if !matches!(&a.kind, NodeKind::Text(own) if std::ptr::eq(&**own, t)) {
+            return Arc::new(text_geom(t));
+        }
         let fonts = vectorcraft_text::FontDb::global().generation();
         if fonts != self.text_fonts {
             self.texts.clear();
@@ -1967,6 +2088,14 @@ fn depends_on_document(n: &Node) -> bool {
 fn holds_type(n: &Node) -> bool {
     let mut holds = false;
     n.walk(&mut |c| holds |= matches!(c.kind, NodeKind::Text(_)) || c.extras().mask.as_ref().is_some_and(|m| holds_type(&m.art)));
+    holds
+}
+
+/// Is `n` a symbol instance, or does it hold one? Its cull bounds measure the instance by its
+/// symbol's art.
+fn holds_instance(n: &Node) -> bool {
+    let mut holds = false;
+    n.walk(&mut |c| holds |= matches!(c.kind, NodeKind::SymbolInstance { .. }));
     holds
 }
 

@@ -767,6 +767,8 @@
 	Do Not Move	No mover
 	Do you want to save the changes you made to “{name}”?	¿Quieres guardar los cambios hechos en “{name}”?
 	Can't open “{name}”.	No se puede abrir «{name}».
+	Can't save “{name}”.	No se puede guardar «{name}».
+	Can't export “{name}”.	No se puede exportar «{name}».
 	Document	Documento
 	Document Color Mode	Modo de color del documento
 	Document Info	Información del documento
@@ -1300,6 +1302,7 @@
 	Ignore	Ignorar
 	Ignore Artboards (all the art as one page)	Ignorar mesas de trabajo (toda la ilustración como una página)
 	Auto Grouping	Agrupación automática
+	Enhanced	Mejorado
 	Ignore Color	Ignorar color
 	Ignore White	Ignorar blanco
 	Palette:	Paleta:
@@ -1390,6 +1393,42 @@
 	Keyboard Shortcut Conflicts	Conflictos de métodos abreviados de teclado
 	Keyboard Shortcut Set	Conjunto de métodos abreviados de teclado
 	Keyboard Shortcuts…	Métodos abreviados de teclado…
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	Importar conjunto de métodos abreviados
+	Import Shortcut Set…	Importar conjunto de métodos abreviados…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Cada entrada del archivo se asocia con una herramienta, un comando o un panel de VectorCraft. Revisa las asociaciones y responde lo que falta.
+	Keys	Teclas
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	El archivo guarda las teclas y los modificadores como códigos. Revisa los significados propuestos y responde los códigos que aún no se conocen.
+	Click, then press the key this code stands for (Esc cancels)	Haz clic y luego presiona la tecla que representa este código (Esc cancela)
+	Press a key…	Presiona una tecla…
+	from your earlier imports	de tus importaciones anteriores
+	from the format's public description	según la descripción pública del formato
+	not known yet	aún desconocido
+	Shortcuts	Métodos abreviados
+	In the File	En el archivo
+	In VectorCraft	En VectorCraft
+	Needs Attention Only	Solo lo que requiere atención
+	Ready	Listo
+	Needs a choice	Requiere una elección
+	Needs a key	Requiere una tecla
+	No equivalent	Sin equivalente
+	Tools take a single key (optionally with Shift)	Las herramientas usan una sola tecla (opcionalmente con Shift)
+	A later row takes this shortcut	Una fila posterior usa este método abreviado
+	Same item as a later row	Mismo elemento que una fila posterior
+	Start from VectorCraft Defaults	Partir de los valores predeterminados de VectorCraft
+	Add to the Current Shortcuts	Agregar a los métodos abreviados actuales
+	Remember My Choices	Recordar mis elecciones
+	{ready} of {total} ready	{ready} de {total} listos
+	The file is too large to read in full, so only its first part is listed.	El archivo es demasiado grande para leerlo completo, así que solo se muestra su primera parte.
+	Report copied	Informe copiado
+	Line {line}	Línea {line}
+	Line {line}: {name}: {status}	Línea {line}: {name}: {status}
+	Read Shortcut Set File	Leer archivo de conjunto de métodos abreviados
+	Import Matches	Asociaciones de importación
+	Remember Import Matches	Recordar asociaciones de importación
+	Forget Import Matches	Olvidar asociaciones de importación
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	coincide con {n} método abreviado predeterminado|coincide con {n} métodos abreviados predeterminados
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	no se leyó {n} parte del archivo|no se leyeron {n} partes del archivo
 	Keywords:	Palabras clave:
 	Knife	Cuchilla
 	Knockout Group	Grupo de exclusión
@@ -2770,6 +2809,7 @@
 	Snap to Glyph	Ajustar a glifo
 	Snap to Grid	Ajustar a cuadrícula
 	Snap to Pixel	Ajustar a píxel
+	Precise Cursors	Cursores precisos
 	Snap to Point	Ajustar a punto
 	Snapping Tolerance	Tolerancia de ajuste
 	Social Square Post 1080×1080	Publicación cuadrada para redes 1080×1080
@@ -3518,6 +3558,7 @@ axis	Both	Ambos
 @msg	Split Into Grid: select paths large enough for the grid	Dividir en cuadrícula: selecciona trazados lo bastante grandes para la cuadrícula
 @msg	Targa files are RGB: colorModel rgb	los archivos Targa son RGB: colorModel rgb
 @msg	Text Wrap: select a wrap object	Ceñir texto: selecciona un objeto para ceñir
+@msg	This shortcut file is in a form VectorCraft can't read.	Este archivo de métodos abreviados tiene un formato que VectorCraft no puede leer.
 @msg	`aspect` must be a number (%)	`aspect` debe ser un número (%)
 @msg	`at` must be [x, y]	`at` debe ser [x, y]
 @msg	`color` must be a colour	`color` debe ser un color
@@ -3751,6 +3792,7 @@ axis	Both	Ambos
 @msg	not a VectorCraft file: {0}	no es un archivo de VectorCraft: {0}
 @msg	not a VectorCraft shortcut set (missing `overrides`)	no es un conjunto de atajos de VectorCraft (falta `overrides`)
 @msg	not a graphic style library (format `{_1}`)	no es una biblioteca de estilos gráficos (formato `{_1}`)
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	no es un conjunto de métodos abreviados: el texto no empieza con un nombre con barra y una llave de apertura
 @msg	not a stored central record	no es un registro central almacenado
 @msg	not a valid plug-in module: {0}	no es un módulo de plugin válido: {0}
 @msg	not an EMF or WMF file	no es un archivo EMF ni WMF
@@ -3798,6 +3840,8 @@ axis	Both	Ambos
 @msg	recovery copy `{file}`: {e}	copia de recuperación `{file}`: {e}
 @msg	resolutions must be between 1 and 2400 ppi	las resoluciones deben estar entre 1 y 2400 ppi
 @msg	result would exceed the canvas (coordinates out of range)	el resultado excedería el lienzo (coordenadas fuera de rango)
+@msg	objects can't be nested more than 32 deep	los objetos no pueden anidarse a más de 32 niveles
+@msg	the SVG's elements are nested more than {0} deep	los elementos del SVG están anidados a más de {0} niveles
 @msg	scale must be a number from {_1} to {_2}, not {_3}	la escala debe ser un número de {_1} a {_2}, no {_3}
 @msg	scale must be a number from {_1} to {_2}, not {s}	la escala debe ser un número de {_1} a {_2}, no {s}
 @msg	select (or target) objects whose appearance isn't basic	selecciona (o apunta a) objetos cuya apariencia no sea básica
@@ -4195,9 +4239,6 @@ axis	Both	Ambos
 	Rotation Y	Rotación Y
 	Rotation Z	Rotación Z
 	Shading	Sombreado
-	Direction	Dirección
-	Elevation	Elevación
-	Ambient	Luz ambiental
 	Segments	Segmentos
 	Show axis	Mostrar eje
 	Reset all	Restablecer todo
@@ -4683,3 +4724,24 @@ mark-style	Japanese	Japonesas
 @msg	unknown parameter `{key}`; the command takes: {keys}	parámetro desconocido `{key}`; el comando acepta: {keys}
 	Load EPS into Clipboard	Cargar EPS en el portapapeles
 @msg	an image of {w} × {h} pixels is too large to draw	una imagen de {w} × {h} píxeles es demasiado grande para dibujarse
+	Fill and Stroke Controls	Controles de relleno y trazo
+	Coloring Controls	Controles de color
+	Draw Mode Controls	Controles de modo de dibujo
+	Screen Mode Controls	Controles de modo de pantalla
+	Drawer menu	Menú del cajón
+	Toolbar: Show Controls	Barra de herramientas: Mostrar controles
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control debe ser fillStroke, coloring, drawMode o screenMode
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	control desconocido `{name}`: fillStroke, coloring, drawMode o screenMode
+@msg	give a fraction `t` from 0 to 1	indica un valor `t` de 0 a 1
+@msg	give the path `id`	indica el `id` del trazado
+@msg	invalid stroke widths	anchuras de trazo no válidas
+@msg	object has no weighted stroke	el objeto no tiene un trazo con un grosor positivo válido
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Radio de esquina único
+	Top Left:	Arriba a la izquierda:
+	Top Right:	Arriba a la derecha:
+	Bottom Left:	Abajo a la izquierda:
+	Bottom Right:	Abajo a la derecha:
+	Softness	Suavidad
+	Ambient Light	Luz ambiental
+	Light behind the object	Luz detrás del objeto

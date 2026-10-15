@@ -722,6 +722,8 @@
 	Do Not Move	不移动
 	Do you want to save the changes you made to “{name}”?	要存储对“{name}”所做的更改吗？
 	Can't open “{name}”.	无法打开“{name}”。
+	Can't save “{name}”.	无法保存“{name}”。
+	Can't export “{name}”.	无法导出“{name}”。
 	Document	文档
 	Document Color Mode	文档颜色模式
 	Document Info	文档信息
@@ -1245,6 +1247,7 @@
 	Ignore	忽略
 	Ignore Artboards (all the art as one page)	忽略画板 (所有图稿作为一页)
 	Auto Grouping	自动编组
+	Enhanced	增强
 	Ignore Color	忽略颜色
 	Ignore White	忽略白色
 	Palette:	调板：
@@ -2657,6 +2660,7 @@
 	Snap to Glyph	靠齐字符
 	Snap to Grid	对齐网格
 	Snap to Pixel	对齐像素
+	Precise Cursors	精确光标
 	Snap to Point	对齐点
 	Snapping Tolerance	吸附容差
 	Social Square Post 1080×1080	社交方形帖子 1080×1080
@@ -3285,6 +3289,42 @@ imageTrace	Outline	轮廓
 	Set:	集：
 	Shortcut	快捷键
 	Use Default	使用默认值
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	导入快捷键组
+	Import Shortcut Set…	导入快捷键组…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	文件中的每个条目都会对应到 VectorCraft 的工具、命令或面板。请检查对应结果，并回答剩余的条目。
+	Keys	按键
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	文件以代码记录按键和修饰键。请检查建议的含义，并回答尚未确定的代码。
+	Click, then press the key this code stands for (Esc cancels)	单击后按下此代码代表的键 (Esc 取消)
+	Press a key…	请按一个键…
+	from your earlier imports	来自你之前的导入
+	from the format's public description	依据格式的公开说明
+	not known yet	尚未确定
+	Shortcuts	快捷键
+	In the File	文件中的名称
+	In VectorCraft	VectorCraft 中的对应
+	Needs Attention Only	仅显示需要处理的条目
+	Ready	就绪
+	Needs a choice	需要选择
+	Needs a key	需要按键
+	No equivalent	无对应项
+	Tools take a single key (optionally with Shift)	工具只能使用单个键 (可搭配 Shift)
+	A later row takes this shortcut	后面的行会使用此快捷键
+	Same item as a later row	与后面某一行的项目相同
+	Start from VectorCraft Defaults	从 VectorCraft 默认开始
+	Add to the Current Shortcuts	添加到当前快捷键
+	Remember My Choices	记住我的选择
+	{ready} of {total} ready	{total} 个中有 {ready} 个就绪
+	The file is too large to read in full, so only its first part is listed.	文件太大，无法完整读取，因此只列出开头部分。
+	Report copied	已复制报告
+	Line {line}	第 {line} 行
+	Line {line}: {name}: {status}	第 {line} 行：{name}：{status}
+	Read Shortcut Set File	读取快捷键组文件
+	Import Matches	导入对应
+	Remember Import Matches	记住导入对应
+	Forget Import Matches	清除导入对应
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	与 {n} 个默认快捷键一致
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	文件中有 {n} 个部分未读取
 	RGB:	RGB：
 	Anchors	锚点
 	Image Trace (Make and Expand)	图像描摹 (创建并扩展)
@@ -3791,9 +3831,6 @@ effect	Vertical	垂直
 	Rotation Y	Y 轴旋转
 	Rotation Z	Z 轴旋转
 	Shading	明暗处理
-	Direction	方向
-	Elevation	仰角
-	Ambient	环境光
 	Segments	分段数
 	Show axis	显示轴
 	Reset all	全部重置
@@ -3899,3 +3936,20 @@ lighting	Light	光源
 @msg	unknown parameter `{key}`; the command takes: {keys}	未知参数 `{key}`；该命令接受：{keys}
 	Load EPS into Clipboard	将 EPS 载入剪贴板
 @msg	an image of {w} × {h} pixels is too large to draw	{w} × {h} 像素的图像过大，无法绘制
+	Fill and Stroke Controls	填色和描边控件
+	Coloring Controls	颜色控件
+	Draw Mode Controls	绘图模式控件
+	Screen Mode Controls	屏幕模式控件
+	Drawer menu	抽屉菜单
+	Toolbar: Show Controls	工具栏：显示控件
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control 必须是 fillStroke、coloring、drawMode 或 screenMode
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	未知控件 `{name}`：fillStroke、coloring、drawMode 或 screenMode
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	统一圆角半径
+	Top Left:	左上：
+	Top Right:	右上：
+	Bottom Left:	左下：
+	Bottom Right:	右下：
+	Softness	柔和度
+	Ambient Light	环境光
+	Light behind the object	光源位于对象后方

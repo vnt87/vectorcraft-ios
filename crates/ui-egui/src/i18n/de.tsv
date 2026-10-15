@@ -753,6 +753,8 @@
 	Do Not Move	Nicht verschieben
 	Do you want to save the changes you made to “{name}”?	Möchten Sie die Änderungen an „{name}“ speichern?
 	Can't open “{name}”.	„{name}“ kann nicht geöffnet werden.
+	Can't save “{name}”.	„{name}“ kann nicht gespeichert werden.
+	Can't export “{name}”.	„{name}“ kann nicht exportiert werden.
 	Document	Dokument
 	Document Color Mode	Dokumentfarbmodus
 	Document Info	Dokumentinformationen
@@ -1282,6 +1284,7 @@
 	Ignore	Ignorieren
 	Ignore Artboards (all the art as one page)	Zeichenflächen ignorieren (gesamte Grafik als eine Seite)
 	Auto Grouping	Automatisch gruppieren
+	Enhanced	Erweitert
 	Ignore Color	Farbe ignorieren
 	Ignore White	Weiß ignorieren
 	Palette:	Palette:
@@ -1372,6 +1375,44 @@
 	Keyboard Shortcut Conflicts	Konflikte bei Tastaturbefehlen
 	Keyboard Shortcut Set	Tastaturbefehlssatz
 	Keyboard Shortcuts…	Tastaturbefehle…
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	Tastaturbefehlssatz importieren
+	Import Shortcut Set…	Tastaturbefehlssatz importieren…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Jeder Eintrag der Datei wird einem Werkzeug, einem Befehl oder einem Bedienfeld von VectorCraft zugeordnet. Prüfen Sie die Zuordnungen und beantworten Sie, was noch offen ist.
+	Keys	Tasten
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Die Datei speichert Tasten und Sondertasten als Codes. Prüfen Sie die vorgeschlagenen Bedeutungen und beantworten Sie die Codes, die noch nicht bekannt sind.
+	Click, then press the key this code stands for (Esc cancels)	Klicken Sie und drücken Sie dann die Taste, für die dieser Code steht (Esc bricht ab)
+	Press a key…	Taste drücken…
+	from your earlier imports	aus Ihren früheren Importen
+	from the format's public description	aus der öffentlichen Beschreibung des Formats
+	not known yet	noch nicht bekannt
+	Shortcuts	Tastaturbefehle
+	Shortcut	Tastaturbefehl
+	In the File	In der Datei
+	In VectorCraft	In VectorCraft
+	Needs Attention Only	Nur Einträge mit Handlungsbedarf
+	Ready	Bereit
+	Needs a choice	Auswahl erforderlich
+	Needs a key	Taste erforderlich
+	No equivalent	Keine Entsprechung
+	Tools take a single key (optionally with Shift)	Werkzeuge verwenden eine einzelne Taste (optional mit Shift)
+	A later row takes this shortcut	Eine spätere Zeile übernimmt diesen Tastaturbefehl
+	Same item as a later row	Gleiches Element wie eine spätere Zeile
+	Start from VectorCraft Defaults	Von den VectorCraft-Standardwerten ausgehen
+	Add to the Current Shortcuts	Zu den aktuellen Tastaturbefehlen hinzufügen
+	Remember My Choices	Meine Auswahl merken
+	{ready} of {total} ready	{ready} von {total} bereit
+	The file is too large to read in full, so only its first part is listed.	Die Datei ist zu groß, um sie vollständig zu lesen. Daher wird nur ihr erster Teil aufgeführt.
+	Report copied	Bericht kopiert
+	Line {line}	Zeile {line}
+	Line {line}: {name}: {status}	Zeile {line}: {name}: {status}
+	Imported. Press OK to keep the imported set.	Importiert. Klicken Sie auf „OK“, um den importierten Satz zu behalten.
+	Read Shortcut Set File	Tastaturbefehlssatz-Datei lesen
+	Import Matches	Import-Zuordnungen
+	Remember Import Matches	Import-Zuordnungen merken
+	Forget Import Matches	Import-Zuordnungen vergessen
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	stimmt mit {n} Standard-Tastaturbefehl überein|stimmt mit {n} Standard-Tastaturbefehlen überein
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	{n} Teil der Datei wurde nicht gelesen|{n} Teile der Datei wurden nicht gelesen
 	Keywords:	Stichwörter:
 	Knife	Messer
 	Knockout Group	Aussparungsgruppe
@@ -2720,6 +2761,7 @@ effect	Points	Punkte
 	Snap to Glyph	An Glyphe ausrichten
 	Snap to Grid	Am Raster ausrichten
 	Snap to Pixel	An Pixel ausrichten
+	Precise Cursors	Präzise Cursor
 	Snap to Point	An Punkt ausrichten
 	Snapping Tolerance	Einrasttoleranz
 	Social Square Post 1080×1080	Quadratischer Social-Media-Beitrag 1080×1080
@@ -3418,6 +3460,7 @@ theme	Appearance	Erscheinungsbild
 @msg	Split Into Grid: select paths large enough for the grid	In Raster teilen: Wählen Sie Pfade aus, die groß genug für das Raster sind
 @msg	Targa files are RGB: colorModel rgb	Targa-Dateien sind RGB: colorModel rgb
 @msg	Text Wrap: select a wrap object	Textumfluss: Wählen Sie ein Umflussobjekt aus
+@msg	This shortcut file is in a form VectorCraft can't read.	Diese Tastaturbefehlsdatei liegt in einem Format vor, das VectorCraft nicht lesen kann.
 @msg	`aspect` must be a number (%)	`aspect` muss eine Zahl sein (%)
 @msg	`at` must be [x, y]	`at` muss [x, y] sein
 @msg	`color` must be a colour	`color` muss eine Farbe sein
@@ -3652,6 +3695,7 @@ theme	Appearance	Erscheinungsbild
 @msg	not a VectorCraft file: {0}	keine VectorCraft-Datei: {0}
 @msg	not a VectorCraft shortcut set (missing `overrides`)	kein VectorCraft-Tastaturbefehlssatz (`overrides` fehlt)
 @msg	not a graphic style library (format `{_1}`)	keine Grafikstil-Bibliothek (Format `{_1}`)
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	kein Tastaturbefehlssatz: Der Text beginnt nicht mit einem Namen mit Schrägstrich und einer öffnenden geschweiften Klammer
 @msg	not a stored central record	kein gespeicherter zentraler Eintrag
 @msg	not a valid plug-in module: {0}	kein gültiges Plug-in-Modul: {0}
 @msg	not an EMF or WMF file	keine EMF- oder WMF-Datei
@@ -3699,6 +3743,8 @@ theme	Appearance	Erscheinungsbild
 @msg	recovery copy `{file}`: {e}	Wiederherstellungskopie `{file}`: {e}
 @msg	resolutions must be between 1 and 2400 ppi	Auflösungen müssen zwischen 1 und 2400 ppi liegen
 @msg	result would exceed the canvas (coordinates out of range)	das Ergebnis würde die Arbeitsfläche überschreiten (Koordinaten außerhalb des Bereichs)
+@msg	objects can't be nested more than 32 deep	Objekte können nicht tiefer als 32 Ebenen verschachtelt werden
+@msg	the SVG's elements are nested more than {0} deep	die Elemente der SVG-Datei sind tiefer als {0} Ebenen verschachtelt
 @msg	scale must be a number from {_1} to {_2}, not {_3}	scale muss eine Zahl von {_1} bis {_2} sein, nicht {_3}
 @msg	scale must be a number from {_1} to {_2}, not {s}	scale muss eine Zahl von {_1} bis {_2} sein, nicht {s}
 @msg	select (or target) objects whose appearance isn't basic	wählen Sie Objekte aus (oder als Ziel), deren Aussehen nicht einfach ist
@@ -4146,13 +4192,10 @@ theme	Appearance	Erscheinungsbild
 @msg	{key} must be a finite coordinate	{key} muss eine endliche Koordinate sein
 @msg	invalid restored panel group	Ungültige wiederhergestellte Bedienfeldgruppe
 # 3D and Materials › Revolve: its options dialog and gizmos.
-	Ambient	Umgebungslicht
 	Axis side	Achsenseite
-	Direction	Richtung
 	Drag rings to rotate. Shift snaps to 15°.	Ziehen Sie die Ringe, um zu drehen. Mit Shift in 15°-Schritten.
 	Drag the light, or its rings. Shift snaps to 15°.	Ziehen Sie das Licht oder seine Ringe. Mit Shift in 15°-Schritten.
 	Drag values or labels. Double-click a value to type.	Ziehen Sie Werte oder Beschriftungen. Doppelklicken Sie auf einen Wert, um ihn einzugeben.
-	Elevation	Höhe
 	Intensity	Intensität
 	Keep visible surfaces only when expanding	Beim Umwandeln nur sichtbare Flächen behalten
 	Lighting	Beleuchtung
@@ -4266,3 +4309,25 @@ theme	Appearance	Erscheinungsbild
 @msg	unknown parameter `{key}`; the command takes: {keys}	unbekannter Parameter `{key}`; der Befehl akzeptiert: {keys}
 	Load EPS into Clipboard	EPS in die Zwischenablage laden
 @msg	an image of {w} × {h} pixels is too large to draw	ein Bild mit {w} × {h} Pixeln ist zu groß, um gezeichnet zu werden
+	Basic	Basis
+	Fill and Stroke Controls	Steuerelemente für Fläche und Kontur
+	Coloring Controls	Steuerelemente für Farbe
+	Draw Mode Controls	Steuerelemente für Zeichenmodus
+	Screen Mode Controls	Steuerelemente für Bildschirmmodus
+	Drawer menu	Menü der Werkzeugschublade
+	Toolbar: Show Controls	Werkzeugleiste: Steuerelemente einblenden
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control muss fillStroke, coloring, drawMode oder screenMode sein
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	unbekanntes Steuerelement `{name}`: fillStroke, coloring, drawMode oder screenMode
+@msg	give a fraction `t` from 0 to 1	geben Sie einen Wert `t` von 0 bis 1 an
+@msg	give the path `id`	geben Sie die `id` des Pfads an
+@msg	invalid stroke widths	ungültige Konturbreiten
+@msg	object has no weighted stroke	das Objekt hat keine Kontur mit einer gültigen positiven Stärke
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Einheitlicher Eckenradius
+	Top Left:	Oben links:
+	Top Right:	Oben rechts:
+	Bottom Left:	Unten links:
+	Bottom Right:	Unten rechts:
+	Softness	Weichheit
+	Ambient Light	Umgebungslicht
+	Light behind the object	Licht hinter dem Objekt

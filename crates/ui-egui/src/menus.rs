@@ -181,11 +181,23 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ),
     ("shortcuts.export", "Export Keyboard Shortcuts…", "", "{path?}"),
     ("shortcuts.import", "Import Keyboard Shortcuts…", "", "{path? | data?}"),
+    (
+        "ui.shortcutImportDialog",
+        "Import Shortcut Set…",
+        "",
+        "{path? | dataBase64?, name?} open Import Shortcut Set for a shortcut set another app saved as text (.kys; without a file, pick one): each entry matched to a tool, command or panel, and its key and modifier codes decoded (dialog `shortcutImport`: name, start: defaults|current, remember, rows: [{name, section, line, key, modifiers, target: entry id | \"\" (no equivalent) | null (not chosen), from, choices, on}], keys and mods: {code: {text, from, votes, names}}); Apply assigns the ready rows over Edit › Keyboard Shortcuts' working set, remembers the matches (importMatches.set) and shows Keyboard Shortcuts, whose OK keeps them. File › Open of a .kys opens it too",
+    ),
     ("view.outline", "Outline", "Cmd+Y", "{} toggle Outline/Preview"),
     ("view.pixelPreview", "Pixel Preview", "Cmd+Alt+Y", "{}"),
     ("view.trimView", "Trim View", "", "{} toggle: hide everything outside the artboards"),
     ("view.cornerWidget", "Hide Corner Widget", "", "{} toggle the live corner widgets"),
     ("view.snapToPixel", "Snap to Pixel", "", "{} toggle: drawing and moving land on whole pixels"),
+    (
+        "view.preciseCursors",
+        "Precise Cursors",
+        "",
+        "{} toggle General › Use Precise Cursors: the drawing tools' pointers become a crosshair → true when on",
+    ),
     ("view.textThreads", "Hide Text Threads", "Cmd+Shift+Y", "{} toggle the thread lines between threaded text frames"),
     ("view.gradientAnnotator", "Hide Gradient Annotator", "Cmd+Alt+G", "{} toggle the Gradient tool's annotator"),
     ("type.hiddenCharacters", "Show Hidden Characters", "Cmd+Alt+I", "{} toggle markers for spaces, paragraph ends and story ends"),
@@ -255,6 +267,12 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "Float Tool Group",
         "",
         "{tool: id, floating?: bool} float the toolbar group holding `tool` (in the current Basic or Advanced layout) as its own strip of tool buttons (true), put it back in the toolbar (false) or toggle (omitted), as dragging or clicking a flyout's tear-off bar and the strip's × do; returns the new state",
+    ),
+    (
+        "toolbar.show",
+        "Toolbar: Show Controls",
+        "",
+        "{control?: \"fillStroke\"|\"coloring\"|\"drawMode\"|\"screenMode\", on?: bool} show (true), hide (false) or toggle (omitted) one of the controls under the toolbar's tools (Fill and Stroke, Coloring, Draw Mode, Screen Mode), as the All Tools drawer's Show section does; saved with the preferences; returns every control's state",
     ),
     (
         "window.editToolbar",
@@ -576,7 +594,7 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "ui.widthPointEdit",
         "Width Point Edit…",
         "",
-        "{id, index} open Width Point Edit for width point `index` of path `id` (dialog `widthPoint`: side1, side2 (pt), linked, adjustAdjoining; double-clicking a width point with the Width tool opens it too): OK runs stroke.widthPoint.set, discard: true (the Delete button) stroke.widthPoint.remove",
+        "{id, index?: existing width point, t?: 0..1 for a new point, adjustAdjoining?: bool (false)} open Width Point Edit on path `id` (dialog `widthPoint`: side1, side2 (pt), linked, adjustAdjoining; double-clicking the stroke opens it too, Shift on a width point enabling adjoining adjustment): OK runs stroke.widthPoint.set; discard: true (Delete) removes an existing point or discards a prospective point",
     ),
     (
         "ui.corners",
@@ -1053,6 +1071,15 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             None => Err("no such saved selection".into()),
         },
         "view.snapToPixel" => flag(&mut app.ui.view.snap_to_pixel),
+        // The preference itself (General › Use Precise Cursors), so the command, the dialog and the saved
+        // preferences share one value.
+        "view.preciseCursors" => {
+            let on = !app.session.prefs.use_precise_cursors;
+            app.run("prefs.set", json!({"key": "usePreciseCursors", "value": on})).map(|_| {
+                crate::prefs_dialog::snapshot(app);
+                json!(on)
+            })
+        }
         "view.textThreads" => flag(&mut app.ui.view.text_threads),
         "type.hiddenCharacters" => flag(&mut app.ui.view.hidden_chars),
         "type.bold" => crate::panels::character::toggle_face(app, Face::Bold),
@@ -1399,6 +1426,7 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             crate::dialogs::find_links::find_in_folder_command(app, s("folder"), p.get("ids").and_then(Value::as_array).cloned())
         }
         "ui.packageDialog" => crate::dialogs::package::open(app),
+        "ui.shortcutImportDialog" => crate::dialogs::shortcut_import::command(app, p),
         "file.showPackage" => crate::dialogs::package::show_package(app, p),
         "docInfo.save" => crate::panels::doc_info::save_report(app, p),
         // Slice Options… and Divide Slices…: their dialogs, on the selected slices.
@@ -1459,7 +1487,7 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
 }
 
 /// `view.goToArtboard`: make artboard `index` (a number, or first / previous / next / last from
-/// the current one) the navigator's, and fit it in the window.
+/// the current one) active, synchronizing the Artboard tool when in use, and fit it in the window.
 fn go_to_artboard(app: &mut VectorcraftApp, p: &Value) -> Result<Value, String> {
     let n = app.session.active().map(|d| d.doc.artboards.len()).ok_or("no document open")?;
     let last = n.checked_sub(1).ok_or("the document has no artboards")?;
@@ -1476,9 +1504,7 @@ fn go_to_artboard(app: &mut VectorcraftApp, p: &Value) -> Result<Value, String> 
         None => return Err("missing index".into()),
     }
     .min(last);
-    if let Some(v) = app.view_mut() {
-        v.artboard = to;
-    }
+    crate::panels::artboards::select(app, to);
     crate::canvas::fit(app, "view.fitArtboard");
     Ok(json!({ "index": to }))
 }
@@ -3990,6 +4016,55 @@ mod tests {
         assert_eq!(dynamic_label(&app, "view.cornerWidget", ""), "Hide Corner Widget");
         app.run("view.cornerWidget", json!({})).unwrap();
         assert_eq!(dynamic_label(&app, "view.cornerWidget", ""), "Show Corner Widget");
+    }
+
+    /// View › Precise Cursors has no menu item or default key, but the command (assignable in Keyboard Shortcuts)
+    /// writes General › Use Precise Cursors, the value the dialog and the saved preferences read.
+    #[test]
+    fn precise_cursors_command_toggles_the_preference() {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
+        assert!(!app.session.prefs.use_precise_cursors);
+        assert_eq!(app.run("view.preciseCursors", json!({})).unwrap(), json!(true));
+        assert!(app.session.prefs.use_precise_cursors);
+        assert_eq!(app.ui.engine_prefs["usePreciseCursors"], json!(true), "saved with the UI state");
+        assert!(UI_COMMANDS.iter().any(|c| c.0 == "view.preciseCursors" && c.2.is_empty()), "assignable, no default key");
+        assert_eq!(app.run("view.preciseCursors", json!({})).unwrap(), json!(false));
+        assert!(!app.session.prefs.use_precise_cursors);
+    }
+
+    /// The command is listed in Edit › Keyboard Shortcuts without a key and takes one the user types; with the
+    /// key it is the command that runs.
+    #[test]
+    fn precise_cursors_command_is_listed_and_assignable_in_the_shortcut_editor() {
+        use crate::shortcut_editor as ed;
+        let e = ed::entry("view.preciseCursors").expect("listed in the editor");
+        assert_eq!((e.label.as_str(), e.group.as_str(), e.is_tool), ("Precise Cursors", "View", false));
+        assert_eq!(ed::default_of("view.preciseCursors"), None, "no default key");
+        let mut overrides = std::collections::BTreeMap::new();
+        assert_eq!(ed::effective_in(&overrides, "view.preciseCursors"), None);
+        assert_eq!(ed::assign(&mut overrides, "view.preciseCursors", Some("Cmd+Alt+Shift+U"), false), Ok(vec![]));
+        let chord = ed::effective_in(&overrides, "view.preciseCursors").expect("assigned");
+        assert_eq!(ed::normalize(&chord), ed::normalize("Cmd+Alt+Shift+U"));
+        // A key another command holds is refused, so the new command can't take it over silently.
+        assert!(ed::assign(&mut overrides, "view.preciseCursors", Some("Cmd+Alt+Shift+P"), false).is_err());
+        assert_eq!(ed::assign(&mut overrides, "view.preciseCursors", None, false), Ok(vec![]));
+        assert_eq!(ed::effective_in(&overrides, "view.preciseCursors"), None, "cleared again");
+    }
+
+    /// The command is a preference, not an edit: no undo step, no unsaved changes, with a document open.
+    #[test]
+    fn precise_cursors_command_is_not_an_edit() {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let steps = |app: &VectorcraftApp| {
+            let st = app.session.active().unwrap();
+            (st.history.undo.len(), st.history.redo.len(), st.is_dirty())
+        };
+        let before = steps(&app);
+        assert!(!before.2);
+        app.run("view.preciseCursors", json!({})).unwrap();
+        assert!(app.session.prefs.use_precise_cursors);
+        assert_eq!(steps(&app), before);
     }
 
     /// Selection & Anchor Display › Zoom to Selection (#394): Zoom In and Zoom Out bring the

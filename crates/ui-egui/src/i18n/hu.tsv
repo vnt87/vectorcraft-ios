@@ -252,7 +252,6 @@
 	Alt+Drag	Alt+húzás
 	Alt:	Helyettesítő szöveg:
 	Alter Paths for Appearance	Útvonalak módosítása a megjelenés szerint
-	Ambient	Környezeti fény
 	Amount	Mérték
 	Amount:	Mérték:
 	Analogous	Analóg
@@ -486,6 +485,8 @@
 	Calligraphic	Kalligrafikus
 	Calligraphic Brush Options	Kalligrafikus ecset beállításai
 	Can't open “{name}”.	Nem nyitható meg: „{name}”.
+	Can't save “{name}”.	Nem menthető: „{name}”.
+	Can't export “{name}”.	Nem exportálható: „{name}”.
 	Can't print these settings: see the Summary	Ezekkel a beállításokkal nem lehet nyomtatni: lásd az Összegzést
 	Cancel	Mégse
 	Cancel Key Object	Kulcsobjektum megszüntetése
@@ -971,7 +972,6 @@
 	Dimensions	Méretek
 	Direct Selection	Közvetlen kijelölés
 	Direct Selection Tool	Közvetlen kijelölés
-	Direction	Irány
 	Direction Balance	Irányegyensúly
 	Direction Handles	Iránykezelő fogantyúk
 	Direction:	Irány:
@@ -1151,7 +1151,6 @@
 	Effective PPI	Tényleges PPI
 	Effects	Effektusok
 	Effect…	Effektus…
-	Elevation	Emelkedési szög
 	Eliminate	Eltávolítás
 	Ellipse	Ellipszis
 	Ellipse Properties:	Ellipszis tulajdonságai:
@@ -1664,6 +1663,7 @@
 	Ignore	Kihagy
 	Ignore Artboards (all the art as one page)	Rajztáblák figyelmen kívül hagyása (az összes grafika egy oldalon)
 	Auto Grouping	Automatikus csoportosítás
+	Enhanced	Továbbfejlesztett
 	Ignore Color	Szín figyelmen kívül hagyása
 	Ignore White	Fehér figyelmen kívül hagyása
 	Image	Kép
@@ -1780,6 +1780,44 @@
 	Keyboard Shortcut Set	Billentyűparancs-készlet
 	Keyboard Shortcuts	Billentyűparancsok
 	Keyboard Shortcuts…	Billentyűparancsok…
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	Billentyűparancs-készlet importálása
+	Import Shortcut Set…	Billentyűparancs-készlet importálása…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	A VectorCraft a fájl minden bejegyzését megfelelteti valamelyik eszközének, parancsának vagy paneljének. Ellenőrizd a megfeleltetéseket, és válaszolj a még nyitott kérdésekre.
+	Keys	Billentyűk
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	A fájl a billentyűket és a módosítóbillentyűket kódként tárolja. Ellenőrizd a javasolt jelentéseket, és add meg a még ismeretlen kódok jelentését.
+	Click, then press the key this code stands for (Esc cancels)	Kattints, majd nyomd le azt a billentyűt, amelyet ez a kód jelöl (Esc: mégse)
+	Press a key…	Nyomj le egy billentyűt…
+	from your earlier imports	a korábbi importálásaidból
+	from the format's public description	a formátum nyilvános leírásából
+	not known yet	még ismeretlen
+	Shortcuts	Billentyűparancsok
+	In the File	A fájlban
+	In VectorCraft	A VectorCraftban
+	Needs Attention Only	Csak a figyelmet igénylő sorok
+	Ready	Kész
+	Needs a choice	Választás szükséges
+	Needs a key	Billentyű szükséges
+	No equivalent	Nincs megfelelője
+	Tools take a single key (optionally with Shift)	Eszközhöz egyetlen billentyű rendelhető (Shifttel vagy anélkül)
+	A later row takes this shortcut	Ezt a billentyűparancsot egy későbbi sor kapja meg
+	Same item as a later row	Ugyanaz az elem, mint egy későbbi sorban
+	Start from VectorCraft Defaults	Kiindulás a VectorCraft-alapértékekből
+	Add to the Current Shortcuts	Hozzáadás a jelenlegi billentyűparancsokhoz
+	Remember My Choices	Választásaim megjegyzése
+	{ready} of {total} ready	Kész: {ready}/{total}
+	The file is too large to read in full, so only its first part is listed.	A fájl túl nagy a teljes beolvasáshoz, ezért csak az első része szerepel a listában.
+	Report copied	Jelentés másolva
+	Line {line}	{line}. sor
+	Line {line}: {name}: {status}	{line}. sor: {name}: {status}
+	Read Shortcut Set File	Billentyűparancs-készlet beolvasása fájlból
+	Import Matches	Importálási megfeleltetések
+	Remember Import Matches	Importálási megfeleltetések megjegyzése
+	Forget Import Matches	Importálási megfeleltetések elfelejtése
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	{n} alapértelmezett billentyűparanccsal egyezik
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	Be nem olvasott fájlrész: {n}
+@msg	This shortcut file is in a form VectorCraft can't read.	Ez a billentyűparancsfájl olyan formátumú, amelyet a VectorCraft nem tud beolvasni.
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	nem billentyűparancs-készlet: a szöveg nem perjeles névvel és nyitó kapcsos zárójellel kezdődik
 	Keywords:	Kulcsszavak:
 	Kind	Típus
 	Kinsoku Set	Kinsoku-készlet
@@ -3354,6 +3392,7 @@
 	Snap to Glyph	Illesztés glifához
 	Snap to Grid	Illesztés a rácshoz
 	Snap to Pixel	Illesztés pixelhez
+	Precise Cursors	Pontos kurzorok
 	Snap to Point	Illesztés pontra
 	Snapping Tolerance	Illesztési tűrés
 	Social	Közösségi média
@@ -4438,6 +4477,8 @@ imageTrace	Outline	Körvonal
 @msg	resolutions must be between 1 and 2400 ppi	a felbontás 1 és 2400 ppi között lehet
 @msg	Restored {_1} recovered document(s): save them to keep them	Helyreállított dokumentumok: {_1}; mentsd őket, ha meg akarod tartani
 @msg	result would exceed the canvas (coordinates out of range)	az eredmény túllépné a vásznat (a koordináták tartományon kívül esnek)
+@msg	objects can't be nested more than 32 deep	az objektumok legfeljebb 32 szint mélyen ágyazhatók egymásba
+@msg	the SVG's elements are nested more than {0} deep	az SVG elemei több mint {0} szint mélyen vannak egymásba ágyazva
 @msg	Save for Web: the image is empty	Mentés webre: a kép üres
 @msg	Save writes {_1}, not {_2}: use document.export for other formats	a Mentés ezt írja: {_1}, ezt nem: {_2}; más formátumhoz használd a document.export parancsot
 @msg	saved panel layout is invalid; reset the workspace first	a mentett panelelrendezés érvénytelen; előbb állítsd vissza a munkaterületet
@@ -4709,3 +4750,24 @@ imageTrace	Outline	Körvonal
 @msg	unknown parameter `{key}`; the command takes: {keys}	ismeretlen paraméter: `{key}`; a parancs ezeket fogadja el: {keys}
 	Load EPS into Clipboard	EPS betöltése a vágólapra
 @msg	an image of {w} × {h} pixels is too large to draw	egy {w} × {h} pixeles kép túl nagy a kirajzoláshoz
+	Fill and Stroke Controls	Kitöltés és körvonal vezérlői
+	Coloring Controls	Színezés vezérlői
+	Draw Mode Controls	Rajzolási mód vezérlői
+	Screen Mode Controls	Képernyőmód vezérlői
+	Drawer menu	Fiók menüje
+	Toolbar: Show Controls	Eszköztár: Vezérlők megjelenítése
+@msg	control must be fillStroke, coloring, drawMode or screenMode	a control értéke fillStroke, coloring, drawMode vagy screenMode lehet
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	ismeretlen vezérlő: `{name}`; fillStroke, coloring, drawMode vagy screenMode
+@msg	give a fraction `t` from 0 to 1	add meg a `t` értékét 0 és 1 között
+@msg	give the path `id`	add meg az útvonal `id` értékét
+@msg	invalid stroke widths	érvénytelen körvonalszélességek
+@msg	object has no weighted stroke	az objektumnak nincs érvényes pozitív vastagságú körvonala
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Egységes sarokkerekítés
+	Top Left:	Bal felső:
+	Top Right:	Jobb felső:
+	Bottom Left:	Bal alsó:
+	Bottom Right:	Jobb alsó:
+	Softness	Lágyság
+	Ambient Light	Környezeti fény
+	Light behind the object	Fény az objektum mögött

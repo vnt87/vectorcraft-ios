@@ -511,6 +511,7 @@
 	Three Point Perspective	3점 투시
 	Save Grid as Preset…	격자를 프리셋으로 저장…
 	Snap to Pixel	픽셀에 스냅
+	Precise Cursors	정밀 커서
 	Snap to Point	포인트에 스냅
 	Snap to Glyph	글리프에 스냅
 	New View…	새 보기…
@@ -1216,6 +1217,8 @@
 	Divide Vertically Into	세로로 나누기
 	Do you want to save the changes you made to “{name}”?	“{name}”의 변경 내용을 저장하시겠습니까?
 	Can't open “{name}”.	“{name}”을(를) 열 수 없습니다.
+	Can't save “{name}”.	“{name}”을(를) 저장할 수 없습니다.
+	Can't export “{name}”.	“{name}”을(를) 내보낼 수 없습니다.
 	Document	문서
 	Document Ink Options	문서 잉크 옵션
 	Document JSON	문서 JSON
@@ -1532,6 +1535,7 @@
 	Ignore	무시
 	Ignore Artboards (all the art as one page)	아트보드 무시 (모든 아트웍을 한 페이지로)
 	Auto Grouping	자동 그룹화
+	Enhanced	향상됨
 	Ignore Color	색상 무시
 	Ignore White	흰색 무시
 	Palette:	팔레트:
@@ -1550,6 +1554,44 @@
 	Import PDF Presets	PDF 프리셋 가져오기
 	Import Perspective Grid Presets	원근 격자 프리셋 가져오기
 	Import Print Presets	인쇄 프리셋 가져오기
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	단축키 세트 가져오기
+	Import Shortcut Set…	단축키 세트 가져오기…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	파일의 각 항목은 VectorCraft의 도구, 명령 또는 패널에 대응됩니다. 대응을 확인하고 남은 항목을 정하세요.
+	Keys	키
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	파일은 키와 보조 키를 코드로 기록합니다. 제안된 의미를 확인하고 아직 알 수 없는 코드의 의미를 정하세요.
+	Click, then press the key this code stands for (Esc cancels)	클릭한 다음 이 코드에 해당하는 키를 누르세요(Esc로 취소)
+	Press a key…	키를 누르세요…
+	from your earlier imports	이전 가져오기에서
+	from the format's public description	형식의 공개 설명에서
+	not known yet	아직 알 수 없음
+	Shortcuts	단축키
+	Shortcut	단축키
+	In the File	파일에서
+	In VectorCraft	VectorCraft에서
+	Needs Attention Only	확인이 필요한 항목만
+	Ready	준비됨
+	Needs a choice	선택 필요
+	Needs a key	키 필요
+	No equivalent	대응 항목 없음
+	Tools take a single key (optionally with Shift)	도구에는 키 하나만 지정할 수 있습니다(Shift 포함 가능)
+	A later row takes this shortcut	뒤의 행이 이 단축키를 사용합니다
+	Same item as a later row	뒤의 행과 같은 항목
+	Start from VectorCraft Defaults	VectorCraft 기본값에서 시작
+	Add to the Current Shortcuts	현재 단축키에 추가
+	Remember My Choices	내 선택 기억
+	{ready} of {total} ready	준비됨 {ready}/{total}
+	The file is too large to read in full, so only its first part is listed.	파일이 너무 커서 전체를 읽을 수 없으므로 앞부분만 표시합니다.
+	Report copied	보고서를 복사했습니다
+	Line {line}	{line}행
+	Line {line}: {name}: {status}	{line}행: {name}: {status}
+	Imported. Press OK to keep the imported set.	가져왔습니다. 가져온 세트를 유지하려면 확인을 누르세요.
+	Read Shortcut Set File	단축키 세트 파일 읽기
+	Import Matches	가져오기 대응
+	Remember Import Matches	가져오기 대응 기억
+	Forget Import Matches	가져오기 대응 지우기
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	기본 단축키 {n}개와 일치|기본 단축키 {n}개와 일치
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	읽지 않은 파일 부분 {n}개|읽지 않은 파일 부분 {n}개
 	Import Transparency Flattener Presets	투명도 병합 프리셋 가져오기
 	Import…	가져오기…
 	In Tangent Handles	안쪽 접선 핸들
@@ -3702,6 +3744,8 @@ theme	Appearance	외관
 @msg	no interaction in progress	진행 중인 상호작용이 없습니다
 @msg	no such object {0}	개체 {0}이(가) 없습니다
 @msg	result would exceed the canvas (coordinates out of range)	결과가 캔버스를 벗어납니다(좌표 범위 초과)
+@msg	objects can't be nested more than 32 deep	개체는 32단계보다 깊게 중첩할 수 없습니다
+@msg	the SVG's elements are nested more than {0} deep	SVG 요소가 {0}단계보다 깊게 중첩되어 있습니다
 @msg	unknown command `{0}`	알 수 없는 명령 `{0}`
 @msg	`{what}` closes nothing	`{what}`이(가) 닫는 항목이 없습니다
 @msg	`{what}` closes something it didn't open	`{what}`이(가) 열지 않은 항목을 닫습니다
@@ -3983,6 +4027,8 @@ theme	Appearance	외관
 @msg	no file reader	파일 판독기가 없습니다
 @msg	no file writer	파일 기록기가 없습니다
 @msg	not a VectorCraft shortcut set (missing `overrides`)	VectorCraft 단축키 세트가 아닙니다(`overrides`가 없음)
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	단축키 세트가 아닙니다: 텍스트가 슬래시 이름과 여는 중괄호로 시작하지 않습니다
+@msg	This shortcut file is in a form VectorCraft can't read.	이 단축키 파일은 VectorCraft가 읽을 수 없는 형식입니다.
 @msg	shortcut for `{k}` must be a string	`{k}`의 단축키는 문자열이어야 합니다
 @msg	tool shortcuts must be a single key (optionally with Shift)	도구 단축키는 키 하나여야 합니다(Shift 포함 가능)
 @msg	unknown preset (one of {_1})	알 수 없는 프리셋({_1} 중 하나)
@@ -4163,9 +4209,6 @@ effect	Vertical	세로
 	Rotation Y	Y 회전
 	Rotation Z	Z 회전
 	Shading	셰이딩
-	Direction	방향
-	Elevation	고도
-	Ambient	주변광
 	Segments	세그먼트
 	Show axis	축 표시
 	Reset all	모두 재설정
@@ -4275,3 +4318,25 @@ lighting	Light	광원
 @msg	unknown parameter `{key}`; the command takes: {keys}	알 수 없는 매개변수 `{key}`: 이 명령이 받는 매개변수: {keys}
 	Load EPS into Clipboard	EPS를 클립보드로 불러오기
 @msg	an image of {w} × {h} pixels is too large to draw	{w} × {h}픽셀 이미지는 너무 커서 그릴 수 없습니다
+	Basic	기본
+	Fill and Stroke Controls	칠 및 획 컨트롤
+	Coloring Controls	색상 컨트롤
+	Draw Mode Controls	그리기 모드 컨트롤
+	Screen Mode Controls	화면 모드 컨트롤
+	Drawer menu	서랍 메뉴
+	Toolbar: Show Controls	도구 막대: 컨트롤 표시
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control은 fillStroke, coloring, drawMode, screenMode 중 하나여야 합니다
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	알 수 없는 컨트롤 `{name}`: fillStroke, coloring, drawMode, screenMode 중 하나
+@msg	give a fraction `t` from 0 to 1	0에서 1 사이의 값 `t`를 지정하세요
+@msg	give the path `id`	패스 `id`를 지정하세요
+@msg	invalid stroke widths	선 너비가 유효하지 않습니다
+@msg	object has no weighted stroke	개체에 유효한 양의 두께를 가진 선이 없습니다
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	단일 모퉁이 반지름
+	Top Left:	왼쪽 위:
+	Top Right:	오른쪽 위:
+	Bottom Left:	왼쪽 아래:
+	Bottom Right:	오른쪽 아래:
+	Softness	부드러움
+	Ambient Light	주변광
+	Light behind the object	개체 뒤의 조명

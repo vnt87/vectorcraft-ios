@@ -821,6 +821,32 @@ fn transforms_act_on_direct_selected_anchors() {
     assert_eq!(points(&s), [(25.0, 0.0), (75.0, 0.0), (100.0, 100.0), (0.0, 100.0)]);
 }
 
+/// #1824: with anchors selected with Direct Selection, the Transform panel's X/Y/W/H
+/// (`object.setBounds`) are the box around those anchors, and only they move or scale.
+#[test]
+fn set_bounds_acts_on_direct_selected_anchors() {
+    let mut s = session();
+    let square = json!({"anchors": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}], "closed": true});
+    let id = NodeId(s.execute("path.create", &square).unwrap()["id"].as_u64().unwrap());
+    let points = |s: &Session| -> Vec<(f64, f64)> {
+        let NodeKind::Path { path, .. } = &s.doc().unwrap().doc.node(id).unwrap().kind else { panic!("a path") };
+        path.subpaths[0].anchors.iter().map(|a| (a.p.x.round(), a.p.y.round())).collect()
+    };
+    s.execute("select.anchors", &json!({"id": id.0, "anchors": [[0, 1]]})).unwrap();
+    s.execute("object.setBounds", &json!({"x": 130, "reference": 0})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 0.0), (100.0, 100.0), (0.0, 100.0)], "only the selected anchor moves");
+    s.execute("object.setBounds", &json!({"y": 20, "reference": 4})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 20.0), (100.0, 100.0), (0.0, 100.0)]);
+    // Two anchors: W scales their box about the reference point, the others stay.
+    s.execute("select.anchors", &json!({"id": id.0, "anchors": [[0, 2], [0, 3]]})).unwrap();
+    s.execute("object.setBounds", &json!({"width": 50, "reference": 3})).unwrap();
+    assert_eq!(points(&s), [(0.0, 0.0), (130.0, 20.0), (50.0, 100.0), (0.0, 100.0)]);
+    // The path selected whole moves as a whole.
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.execute("object.setBounds", &json!({"x": 10, "reference": 0})).unwrap();
+    assert_eq!(points(&s), [(10.0, 0.0), (140.0, 20.0), (60.0, 100.0), (10.0, 100.0)]);
+}
+
 /// Arrange commands that leave the stacking order as it is record no undo step: Bring to Front and
 /// Bring Forward on the front objects, Send to Back and Send Backward on the back ones, and Send to
 /// Current Layer on objects already on top of the current layer.
@@ -1478,6 +1504,26 @@ fn direct_selection_moves_one_anchor() {
     let p = s.doc().unwrap().doc.node(a).unwrap().path_data().unwrap().clone();
     assert_eq!(p.subpaths[0].anchors[0].p, vectorcraft_geom::Point::new(90.0, 90.0));
     assert_eq!(p.subpaths[0].anchors[1].p, vectorcraft_geom::Point::new(200.0, 100.0));
+}
+
+/// #1816: with Snap to Grid on, a dragged anchor lands on the grid's subdivisions, not on whole
+/// points, even with Snap to Pixel left on too.
+#[test]
+fn direct_selection_snaps_anchors_to_the_grid() {
+    let mut s = session();
+    let a = rect(&mut s, 101.0, 101.0, 100.0, 100.0);
+    s.execute("select.none", &json!({})).unwrap();
+    let step = s.doc().unwrap().doc.grid.spacing / f64::from(s.doc().unwrap().doc.grid.subdivisions.max(1));
+    let on_grid = |v: f64| (v / step - (v / step).round()).abs() < 1e-9;
+    let v = ViewInfo { snap_to_grid: true, snap_to_pixel: true, ..ViewInfo::default() };
+    s.select_tool("directSelection", v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Down, 101.0, 101.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Drag, 131.0, 113.0), v).unwrap();
+    s.pointer(&PointerEvent::new(PointerKind::Up, 131.0, 113.0), v).unwrap();
+    let p = s.doc().unwrap().doc.node(a).unwrap().path_data().unwrap().clone();
+    let moved = p.subpaths[0].anchors[0].p;
+    assert!(on_grid(moved.x) && on_grid(moved.y), "anchor at {moved:?}, grid step {step}");
+    assert_eq!(p.subpaths[0].anchors[1].p, vectorcraft_geom::Point::new(201.0, 101.0));
 }
 
 /// Follow-up to #1254: toggling or adding anchors of a path selected as a whole starts from all
@@ -2302,6 +2348,39 @@ fn align_moves_selected_anchor_points() {
     s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
     s.execute("object.align", &json!({"vertical": "top", "to": "artboard"})).unwrap();
     assert_eq!(anchors(&s)[2].1 - anchors(&s)[0].1, 120.0, "its shape kept");
+}
+
+/// #1636: with anchor points selected, the Distribute commands space those points, on one path
+/// or across paths, and leave the other points and the paths' objects where they are.
+#[test]
+fn distribute_spaces_selected_anchor_points() {
+    let mut s = session();
+    let new = |s: &mut Session, d: &str| NodeId(s.execute("path.create", &json!({"d": d})).unwrap()["id"].as_u64().unwrap());
+    let a = new(&mut s, "M10 10 L20 50 L100 30 L60 90");
+    let pts = |s: &Session, id: NodeId| -> Vec<(f64, f64)> {
+        s.doc().unwrap().doc.node(id).unwrap().path_data().unwrap().anchors().map(|(_, _, a)| (a.p.x, a.p.y)).collect()
+    };
+    // One path selected whole is one object: nothing to distribute.
+    assert!(s.execute("object.distribute", &json!({"horizontal": "center"})).is_err());
+    s.execute("select.anchors", &json!({"id": a.0, "anchors": [[0, 0], [0, 1], [0, 2]], "mode": "set"})).unwrap();
+    for h in ["left", "center", "right"] {
+        s.execute("object.distribute", &json!({"horizontal": h})).unwrap();
+        assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 50.0), (100.0, 30.0), (60.0, 90.0)], "{h}: a point has no width");
+    }
+    let steps = history(&s);
+    s.execute("object.distribute", &json!({"horizontal": "left"})).unwrap();
+    assert_eq!(history(&s), steps, "already distributed: no undo step");
+    s.execute("object.distribute", &json!({"vertical": "top"})).unwrap();
+    assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 50.0), (100.0, 30.0), (60.0, 90.0)], "10, 30, 50 are even already");
+    s.execute("object.distributeSpacing", &json!({"axis": "vertical", "spacing": 5})).unwrap();
+    assert_eq!(pts(&s, a), [(10.0, 10.0), (55.0, 20.0), (100.0, 15.0), (60.0, 90.0)], "5 apart from the first, in order");
+    assert!(s.execute("object.distribute", &json!({})).is_err());
+    // Across paths: the points of both, with the second path's unselected point left alone.
+    let b = new(&mut s, "M40 200 L400 300");
+    s.execute("select.anchors", &json!({"id": a.0, "anchors": [[0, 0], [0, 2]], "mode": "set"})).unwrap();
+    s.execute("select.anchors", &json!({"id": b.0, "anchors": [[0, 0]], "mode": "add"})).unwrap();
+    s.execute("object.distributeSpacing", &json!({"axis": "horizontal"})).unwrap();
+    assert_eq!((pts(&s, a)[0].0, pts(&s, b), pts(&s, a)[2].0), (10.0, vec![(55.0, 200.0), (400.0, 300.0)], 100.0));
 }
 
 /// Repeating anchor Align must leave one Undo for the move that actually changed the path.

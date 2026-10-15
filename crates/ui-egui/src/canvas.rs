@@ -3,7 +3,7 @@
 
 use egui::{Color32, CornerRadius, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
 use serde_json::json;
-use vectorcraft_doc::{Node, NodeKind, Unit};
+use vectorcraft_doc::{Node, NodeKind, SymbolBoxes, Unit};
 use vectorcraft_geom::{Affine, BezPath, PathEl, Point, Rect};
 use vectorcraft_tools::{Cursor, Mods, Overlay, PointerEvent, PointerKind};
 
@@ -153,6 +153,11 @@ pub fn fit(app: &mut VectorcraftApp, how: &str) {
 pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let full = ui.available_rect_before_wrap();
+    // `hidden_chars` holds the marks Show Hidden Characters kept and the text nodes they were laid
+    // out from. Only the assignment right before the overlay call below puts them back. A frame
+    // that does not draw the overlay drops them, for example with the option off, with the edges
+    // hidden, on the Home screen or with no document open.
+    let hidden_chars = std::mem::take(&mut app.canvas.hidden_chars);
     // A document that opened, closed or became active since Home was chosen replaces it.
     if app.ui.home.is_some_and(|k| k != crate::menus::home_key(app)) {
         app.ui.home = None;
@@ -345,14 +350,7 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
         match k.pixel {
             // Document pixels: placed over the document rect they cover, turning with the view.
             Some([x0, y0, x1, y1]) => {
-                let q = xf.quad(Rect::new(x0 as f64, y0 as f64, x1 as f64, y1 as f64));
-                let mut mesh = egui::Mesh::with_texture(tex.id());
-                for (pos, uv) in q.into_iter().zip([pos2(0.0, 0.0), pos2(1.0, 0.0), pos2(1.0, 1.0), pos2(0.0, 1.0)]) {
-                    mesh.vertices.push(egui::epaint::Vertex { pos, uv, color: Color32::WHITE });
-                }
-                mesh.add_triangle(0, 1, 2);
-                mesh.add_triangle(0, 2, 3);
-                painter.add(Shape::mesh(mesh));
+                textured_quad(&painter, tex.id(), &xf.quad(Rect::new(x0 as f64, y0 as f64, x1 as f64, y1 as f64)), (1.0, 1.0));
             }
             None if (k.rot - v.rotation).abs() < 1e-9 => {
                 // Reproject the last frame if it was rendered for a different view.
@@ -361,7 +359,14 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
                 let b = xf.to_screen(old.to_doc(rect.max));
                 painter.image(tex.id(), egui::Rect::from_min_max(a, b), egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             }
-            None => {}
+            // The view turned after the last frame was rendered, and the worker renders the frame at
+            // the new angle. Until it arrives, the last frame is drawn turned into this view: each
+            // corner goes where this view puts the document point that the corner showed.
+            None => {
+                let old = Xf { rect, zoom: k.zoom, center: Point::new(k.cx, k.cy), rot: k.rot.to_radians() };
+                let q = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()].map(|c| xf.to_screen(old.to_doc(c)));
+                textured_quad(&painter, tex.id(), &q, (1.0, 1.0));
+            }
         }
     }
     if let Some(look) = grid_look.filter(|_| !grids_in_back) {
@@ -438,6 +443,7 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
             thread_overlay(app, &painter, &xf);
         }
         if app.ui.view.hidden_chars {
+            app.canvas.hidden_chars = hidden_chars;
             hidden_chars_overlay(app, &painter, &xf);
         }
     }
@@ -484,7 +490,8 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
             {
                 crate::place::paint_cursor(app, ui.ctx(), &painter, hp);
             }
-            // Caps Lock gives precise (crosshair) cursors, like Illustrator; env opt-out for system cursors.
+            // The glyph cursors are drawn here; General › Use Precise Cursors (the session turns the drawing tools' pointers
+            // into crosshairs, `Cursor::precise`) needs no handling. VECTORCRAFT_SYSTEM_CURSORS opts out of the glyphs.
             let custom = std::env::var_os("VECTORCRAFT_SYSTEM_CURSORS").is_none();
             // User Interface › Scale Cursor Proportional to UI: the glyphs grow with UI Scaling;
             // off, they keep their size.
@@ -492,7 +499,7 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
             match ui.input(|i| i.pointer.hover_pos()) {
                 // An OS cursor: the system moves it at once, where a painted one trails the pointer
                 // (#444). The system cursor stands in for cursors without a glyph.
-                Some(_) if custom && crate::cursors::OS_CURSORS => {
+                Some(_) if custom && crate::cursors::os_cursors(crate::cursors::OS_CURSORS, app.services.wayland) => {
                     let ppp = ui.ctx().pixels_per_point() / ui_scale;
                     ui.ctx().set_cursor_image(app.canvas.cursors.get(c, ppp));
                     cursor_icon(c)
@@ -1013,10 +1020,15 @@ pub(crate) const TRANSPARENCY_GRID: &str = "transparency grid";
 /// The transparency grid over the artboard `ab` (screen corners `quad`): one textured quad whose
 /// cells stay `cell` screen points at every zoom and turn with a rotated view.
 fn checker(p: &egui::Painter, quad: &[Pos2], ab: Rect, zoom: f64, tex: egui::TextureId, cell: f32) {
-    let mut mesh = egui::Mesh::with_texture(tex);
     // Two cells per texture repeat.
     let per = (2.0 * cell as f64 / zoom).max(1e-9);
-    let (u, v) = ((ab.width() / per) as f32, (ab.height() / per) as f32);
+    textured_quad(p, tex, quad, ((ab.width() / per) as f32, (ab.height() / per) as f32));
+}
+
+/// One quad drawn with `tex`: its corners `quad` (from the top left, clockwise) show the texture
+/// from (0, 0) to (`u`, `v`).
+fn textured_quad(p: &egui::Painter, tex: egui::TextureId, quad: &[Pos2], (u, v): (f32, f32)) {
+    let mut mesh = egui::Mesh::with_texture(tex);
     for (pos, uv) in quad.iter().zip([pos2(0.0, 0.0), pos2(u, 0.0), pos2(u, v), pos2(0.0, v)]) {
         mesh.vertices.push(egui::epaint::Vertex { pos: *pos, uv, color: Color32::WHITE });
     }
@@ -1304,8 +1316,8 @@ fn c32(rgb: [u8; 3]) -> Color32 {
 }
 
 /// Outline of a node for highlighting (paths, compound children, area type frames, other
-/// text/image bounds).
-fn node_outline(n: &Node) -> BezPath {
+/// text/image bounds, symbol instances' bounds measured by their art from `symbols`).
+fn node_outline(n: &Node, symbols: &SymbolBoxes) -> BezPath {
     let mut bp = BezPath::new();
     walk_drawn(n, &mut |c| match &c.kind {
         NodeKind::Path { path, .. } => bp.extend(path.to_bezpath()),
@@ -1317,7 +1329,7 @@ fn node_outline(n: &Node) -> BezPath {
             }
         }
         NodeKind::Text(_) | NodeKind::Image(_) | NodeKind::SymbolInstance { .. } => {
-            if let Some(b) = c.geometric_bounds() {
+            if let Some(b) = c.geometric_bounds_with(symbols) {
                 bp.extend(vectorcraft_geom::shapes::rectangle(b).to_bezpath());
             }
         }
@@ -1496,7 +1508,7 @@ fn hover_highlight(app: &VectorcraftApp, p: &egui::Painter, xf: &Xf) {
     }
     if let Some(n) = st.doc.node(id).filter(|n| !too_many_anchors([*n])) {
         let color = c32(st.doc.layer_color(id));
-        stroke_path(p, &node_outline(n), xf, Stroke::new(1.5, color));
+        stroke_path(p, &node_outline(n, &st.doc.symbol_boxes()), xf, Stroke::new(1.5, color));
     }
 }
 
@@ -1545,25 +1557,86 @@ fn curve_point(p: &egui::Painter, c: Pos2, color: Color32, filled: bool, size: f
 }
 
 /// Type → Show Hidden Characters: spaces as dots, ¶ at paragraph ends, # at the end of a story.
-fn hidden_chars_overlay(app: &VectorcraftApp, p: &egui::Painter, xf: &Xf) {
+/// The marks of each text object are kept from one frame to the next ([`HiddenChars`]).
+fn hidden_chars_overlay(app: &mut VectorcraftApp, p: &egui::Painter, xf: &Xf) {
     let Some(st) = app.session.active() else { return };
     let clip = p.clip_rect();
     let color = Color32::from_rgb(0x4f, 0x9d, 0xff);
     let font = egui::FontId::proportional(((10.0 * xf.zoom) as f32).clamp(7.0, 18.0));
-    st.doc.walk(|n| {
+    let kept = &mut app.canvas.hidden_chars;
+    // `last` holds the marks of the last frame. The marks of the objects this frame doesn't draw
+    // are dropped at the end.
+    let mut last = std::mem::take(&mut kept.marks);
+    // The inputs are read before any layout: when fonts load during this frame, the next frame
+    // lays all type out again.
+    let inputs = (vectorcraft_text::FontDb::global().generation(), vectorcraft_text::hyphenation_exceptions());
+    if kept.inputs != inputs {
+        last.clear();
+        kept.inputs = inputs;
+    }
+    // `walk` visits each node's `Arc` in the order `Document::walk` visits the nodes (depth first,
+    // in paint order).
+    fn walk(nodes: &[std::sync::Arc<Node>], f: &mut impl FnMut(&std::sync::Arc<Node>)) {
+        for n in nodes {
+            f(n);
+            if let Some(children) = n.children() {
+                walk(children, f);
+            }
+        }
+    }
+    walk(&st.doc.layers, &mut |n| {
         let NodeKind::Text(tx) = &n.kind else { return };
         if !n.visible || n.geometric_bounds().is_none_or(|b| !xf.rect_to_screen(b).intersects(clip)) {
             return;
         }
+        let marks = match last.remove(&n.id) {
+            Some((was, marks)) if std::sync::Arc::ptr_eq(&was, n) => marks,
+            _ => std::sync::Arc::new(HiddenMarks::of(tx)),
+        };
+        for &at in &marks.spaces {
+            p.circle_filled(xf.to_screen(at), 1.2, color);
+        }
+        for &(at, glyph) in &marks.ends {
+            p.text(xf.to_screen(at), egui::Align2::LEFT_BOTTOM, glyph, font.clone(), color);
+        }
+        kept.marks.insert(n.id, (n.clone(), marks));
+    });
+}
+
+/// The Show Hidden Characters marks of the text objects drawn in the last frame
+/// ([`crate::CanvasCache::hidden_chars`]). Each is kept with the object it was laid out from: an
+/// edited object is a new `Arc` and is laid out again, and all type is laid out again when the
+/// fonts or the hyphenation exceptions change.
+#[derive(Default)]
+pub struct HiddenChars {
+    /// The fonts' generation ([`vectorcraft_text::FontDb::generation`]) and the hyphenation
+    /// exceptions the marks were laid out with.
+    inputs: (u64, String),
+    /// Each text object drawn, by id: the node it was laid out from and its marks.
+    marks: std::collections::HashMap<vectorcraft_doc::NodeId, (std::sync::Arc<Node>, std::sync::Arc<HiddenMarks>)>,
+}
+
+/// One text object's marks in document space: a dot over each space, and ¶ or # after the lines
+/// that end a paragraph or the story. Type on a path has none.
+#[derive(Default)]
+struct HiddenMarks {
+    spaces: Vec<Point>,
+    ends: Vec<(Point, &'static str)>,
+}
+
+impl HiddenMarks {
+    /// Lay out `tx` and place its marks.
+    fn of(tx: &vectorcraft_doc::TextObject) -> Self {
+        let mut marks = Self::default();
         let lay = vectorcraft_text::layout(vectorcraft_text::FontDb::global(), tx);
         if lay.on_path {
-            return;
+            return marks;
         }
         let text = tx.plain_text();
-        let to = |q: Point| xf.to_screen(tx.xf * q);
+        let to = |q: Point| tx.xf * q;
         for g in &lay.glyphs {
             if text.get(g.byte..).is_some_and(|s| s.starts_with(' ')) {
-                p.circle_filled(to(Point::new(g.origin.x + g.advance / 2.0, g.origin.y - 3.0)), 1.2, color);
+                marks.spaces.push(to(Point::new(g.origin.x + g.advance / 2.0, g.origin.y - 3.0)));
             }
         }
         for (i, line) in lay.lines.iter().enumerate() {
@@ -1577,10 +1650,11 @@ fn hidden_chars_overlay(app: &VectorcraftApp, p: &egui::Painter, xf: &Xf) {
                 ("", false)
             };
             if at {
-                p.text(to(Point::new(line.x1 + 1.0, line.baseline)), egui::Align2::LEFT_BOTTOM, glyph, font.clone(), color);
+                marks.ends.push((to(Point::new(line.x1 + 1.0, line.baseline)), glyph));
             }
         }
-    });
+        marks
+    }
 }
 
 /// Text threads of the selected frames: a line from each frame's out port (bottom right) to the
@@ -1696,6 +1770,7 @@ fn selection_overlay(app: &mut VectorcraftApp, p: &egui::Painter, xf: &Xf, curve
     let big_bounds = if big { app.selection_bounds() } else { None };
     let app = &*app;
     let Some(st) = app.session.active() else { return };
+    let symbols = st.doc.symbol_boxes();
     let tool = app.session.tool_id();
     let direct = vectorcraft_tools::catalog::edits_anchors(tool);
     let curvature = tool == "curvature";
@@ -1715,9 +1790,9 @@ fn selection_overlay(app: &mut VectorcraftApp, p: &egui::Painter, xf: &Xf, curve
     // too many paths to outline.
     if let Some((k, n)) = st.selection.key.and_then(|k| Some((k, st.doc.node(k)?))) {
         let outline = if too_many_anchors([n]) {
-            n.geometric_bounds().map(|b| vectorcraft_geom::shapes::rectangle(b).to_bezpath())
+            n.geometric_bounds_with(&symbols).map(|b| vectorcraft_geom::shapes::rectangle(b).to_bezpath())
         } else {
-            Some(node_outline(n))
+            Some(node_outline(n, &symbols))
         };
         if let Some(bp) = outline {
             stroke_path(p, &bp, xf, Stroke::new(KEY_OUTLINE, c32(st.doc.layer_color(k))));
@@ -1728,7 +1803,7 @@ fn selection_overlay(app: &mut VectorcraftApp, p: &egui::Painter, xf: &Xf, curve
         let color = c32(st.doc.layer_color(*id));
         let partial = st.selection.partial(*id);
         // Path outlines.
-        stroke_path(p, &node_outline(n), xf, Stroke::new(1.0, color));
+        stroke_path(p, &node_outline(n, &symbols), xf, Stroke::new(1.0, color));
         // Anchors (and handles for selected anchors in direct mode); a gradient mesh's or a mesh
         // envelope's points.
         walk_drawn(n, &mut |c| {
@@ -1790,7 +1865,7 @@ fn selection_overlay(app: &mut VectorcraftApp, p: &egui::Painter, xf: &Xf, curve
         });
         // Centre point (Attributes panel → Show Center).
         if n.shows_center()
-            && let Some(b) = n.geometric_bounds()
+            && let Some(b) = n.geometric_bounds_with(&symbols)
         {
             anchor_square(p, xf.to_screen(b.center()), color, true, anchor(false));
         }
@@ -2237,6 +2312,32 @@ mod tests {
     use vectorcraft_engine::Session;
     use vectorcraft_geom::Shape as _;
 
+    /// With VECTORCRAFT_SYSTEM_CURSORS set the glyphs aren't drawn and the system's cursors stand in: those of
+    /// the Pen and the other drawing tools are the system crosshair already, so Use Precise Cursors makes no
+    /// difference to them there.
+    #[test]
+    fn system_cursors_show_the_same_crosshair_with_precise_cursors_on_or_off() {
+        for c in [
+            Cursor::Pen,
+            Cursor::PenAdd,
+            Cursor::PenDelete,
+            Cursor::PenClose,
+            Cursor::PenContinue,
+            Cursor::PenJoin,
+            Cursor::PenConvert,
+            Cursor::Eyedropper,
+            Cursor::Slice,
+            Cursor::Blend,
+            Cursor::BlendObject,
+            Cursor::BlendAnchor,
+            Cursor::ShapeBuilder,
+            Cursor::ShapeBuilderErase,
+        ] {
+            assert_eq!(cursor_icon(c), egui::CursorIcon::Crosshair, "{c:?}");
+            assert_eq!(cursor_icon(c), cursor_icon(c.precise()), "{c:?}");
+        }
+    }
+
     /// #826: in a turned view each ruler still has ticks along its whole length; at 0° the top one
     /// reads x where the canvas has it.
     #[test]
@@ -2326,9 +2427,27 @@ mod tests {
         let st = s.active().unwrap();
         let g = st.doc.node(st.selection.objects[0]).unwrap();
         assert!(g.extras().shaper.is_some());
-        let bounds = node_outline(g).bounding_box();
+        let symbols = st.doc.symbol_boxes();
+        let bounds = node_outline(g, &symbols).bounding_box();
         assert!((bounds.x0 - 100.0).abs() < 0.01 && (bounds.x1 - 200.0).abs() < 0.01, "{bounds:?}");
-        assert_eq!(node_outline(st.doc.node(line).unwrap()).bounding_box().x0, 50.0, "an isolated original still shows its full outline");
+        assert_eq!(node_outline(st.doc.node(line).unwrap(), &symbols).bounding_box().x0, 50.0, "an isolated original still shows its full outline");
+    }
+
+    #[test]
+    fn a_symbol_instance_is_outlined_around_its_art() {
+        // A symbol holding the square of the SVG import tests' `Star` symbol, 20 × 20 from (0, 0),
+        // and an instance of it at (20, 30).
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><defs><symbol id="Star"><path d="M0 0H20V20H0Z" fill="#e0a000"/></symbol></defs><use href="#Star" x="20" y="30"/></svg>"##;
+        let mut s = Session::new();
+        s.execute("document.open", &json!({"name": "star.svg", "dataBase64": vectorcraft_format::base64_encode(svg.as_bytes())})).unwrap();
+        let st = s.active().unwrap();
+        let mut inst = None;
+        st.doc.walk(|n| {
+            if matches!(n.kind, NodeKind::SymbolInstance { .. }) {
+                inst = Some(n);
+            }
+        });
+        assert_eq!(node_outline(inst.unwrap(), &st.doc.symbol_boxes()).bounding_box(), Rect::new(20.0, 30.0, 40.0, 50.0));
     }
 
     /// One headless canvas frame on an 800 × 600 window.
@@ -2538,6 +2657,130 @@ mod tests {
         drag(&mut app, pos2(rect.center().x, rect.top() - RULER / 2.0), pos2(rect.center().x + 40.0, rect.top() - 4.0));
         assert_eq!(guides(&app).len(), 2);
         assert_eq!(app.session.active().unwrap().doc.art_bounds(), None, "the tool drew nothing");
+    }
+
+    #[test]
+    fn new_ruler_guides_follow_alt_through_preview_release_and_undo() {
+        use egui::{Event, Modifiers};
+        for source_vertical in [false, true] {
+            for initially_alt in [false, true] {
+                let mut app = VectorcraftApp::new(Session::new(), Default::default());
+                app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+                app.session.execute("document.setRulerOrigin", &json!({"x": 17, "y": 23})).unwrap();
+                app.ui.view.rulers = true;
+                app.ui.view.smart_guides = false;
+                app.ui.view.snap_to_point = false;
+                app.select_tool("rectangle");
+                let ctx = egui::Context::default();
+                frame(&mut app, &ctx, vec![]);
+                let rect = app.canvas_rect.unwrap();
+                let xf = Xf::new(rect, app.view().unwrap());
+                let from =
+                    if source_vertical { pos2(rect.left() - RULER / 2.0, rect.center().y) } else { pos2(rect.center().x, rect.top() - RULER / 2.0) };
+                let at = xf.to_screen(Point::new(80.0, 120.0));
+                assert!(rect.contains(at));
+                let held = |alt| if alt { Modifiers::ALT } else { Modifiers::NONE };
+                let button = |pos, pressed, alt| Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: held(alt) };
+                let before = app.session.active().unwrap().doc.clone();
+                let undo = app.session.active().unwrap().history.undo.len();
+                frame(&mut app, &ctx, vec![Event::ModifiersChanged(held(initially_alt)), Event::PointerMoved(from)]);
+                frame(&mut app, &ctx, vec![button(from, true, initially_alt)]);
+                frame(&mut app, &ctx, vec![Event::PointerMoved(at)]);
+                let assert_guide = |app: &VectorcraftApp, alt: bool, pos: Point| {
+                    let guides = &app.session.active().unwrap().doc.guides;
+                    assert_eq!(guides.len(), 1);
+                    assert_eq!(guides[0].vertical, source_vertical != alt);
+                    let expected = if source_vertical != alt { pos.x } else { pos.y };
+                    assert!((guides[0].pos - expected).abs() < 1e-4, "{:?}, expected {expected}", guides[0]);
+                    assert_eq!(guides[0].artboard, None);
+                };
+                assert_guide(&app, initially_alt, Point::new(80.0, 120.0));
+                // Modifier changes with no pointer movement refresh the existing preview.
+                for alt in [!initially_alt, initially_alt] {
+                    frame(&mut app, &ctx, vec![Event::ModifiersChanged(held(alt))]);
+                    assert_guide(&app, alt, Point::new(80.0, 120.0));
+                    assert_eq!(app.session.active().unwrap().history.undo.len(), undo);
+                }
+                // Equal coordinates must not hide an orientation change in the preview.
+                let equal = xf.to_screen(Point::new(120.0, 120.0));
+                frame(&mut app, &ctx, vec![Event::PointerMoved(equal)]);
+                frame(&mut app, &ctx, vec![Event::ModifiersChanged(held(!initially_alt))]);
+                assert_guide(&app, !initially_alt, Point::new(120.0, 120.0));
+                let release = Point::new(147.0, 183.0);
+                let to = xf.to_screen(release);
+                frame(&mut app, &ctx, vec![Event::ModifiersChanged(Modifiers::ALT), Event::PointerMoved(to), button(to, false, true)]);
+                assert_guide(&app, true, release);
+                let st = app.session.active().unwrap();
+                assert_eq!(st.history.undo.len(), undo + 1);
+                assert_eq!(st.history.undo.last().unwrap().label, "New Guide");
+                assert_eq!(st.doc.ruler_origin, before.ruler_origin);
+                assert_eq!(st.doc.art_bounds(), before.art_bounds(), "the rectangle tool never drew");
+                let committed = st.doc.clone();
+                // Canvas guides still span the viewport after changing orientation.
+                let painted = shapes(&mut app, &ctx);
+                let window = app.canvas_rect.unwrap();
+                let position = Xf::new(window, app.view().unwrap()).to_screen(release);
+                let ends = if source_vertical {
+                    [pos2(window.left(), position.y), pos2(window.right(), position.y)]
+                } else {
+                    [pos2(position.x, window.top()), pos2(position.x, window.bottom())]
+                };
+                assert!(painted.iter().any(|s| matches!(s, Shape::LineSegment { points, .. }
+                    if (points[0] - ends[0]).length() < 0.01 && (points[1] - ends[1]).length() < 0.01)));
+                app.session.execute("edit.undo", &json!({})).unwrap();
+                assert_eq!(&*app.session.active().unwrap().doc, &*before);
+                app.session.execute("edit.redo", &json!({})).unwrap();
+                assert_eq!(&*app.session.active().unwrap().doc, &*committed);
+            }
+        }
+    }
+
+    #[test]
+    fn new_ruler_guide_alt_cancel_keeps_document_and_redo() {
+        use egui::{Event, Modifiers};
+        for source_vertical in [false, true] {
+            for tool in ["rectangle", "artboard"] {
+                let mut app = VectorcraftApp::new(Session::new(), Default::default());
+                app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+                app.session.execute("document.setRulerOrigin", &json!({"x": 17, "y": 23})).unwrap();
+                app.session.execute("shape.rectangle", &json!({"x": 40, "y": 50, "width": 20, "height": 30})).unwrap();
+                app.session.execute("edit.undo", &json!({})).unwrap();
+                app.ui.view.rulers = true;
+                app.ui.view.smart_guides = false;
+                app.ui.view.snap_to_point = false;
+                app.select_tool(tool);
+                let ctx = egui::Context::default();
+                frame(&mut app, &ctx, vec![]);
+                let rect = app.canvas_rect.unwrap();
+                let xf = Xf::new(rect, app.view().unwrap());
+                let from =
+                    if source_vertical { pos2(rect.left() - RULER / 2.0, rect.center().y) } else { pos2(rect.center().x, rect.top() - RULER / 2.0) };
+                let at = xf.to_screen(Point::new(80.0, 120.0));
+                let button = |pos, pressed| Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::ALT };
+                let before = app.session.active().unwrap().doc.clone();
+                let history = |app: &VectorcraftApp| {
+                    let st = app.session.active().unwrap();
+                    (st.history.undo.len(), st.history.redo.len(), st.is_dirty())
+                };
+                let before_history = history(&app);
+                assert_eq!(before_history.1, 1);
+                frame(&mut app, &ctx, vec![Event::ModifiersChanged(Modifiers::ALT), Event::PointerMoved(from)]);
+                frame(&mut app, &ctx, vec![button(from, true)]);
+                frame(&mut app, &ctx, vec![Event::PointerMoved(at)]);
+                let guides = &app.session.active().unwrap().doc.guides;
+                assert_eq!(guides.len(), 1);
+                assert_eq!(guides[0].vertical, !source_vertical);
+                let artboard = (tool == "artboard").then_some(before.artboards[0].id);
+                assert_eq!(guides[0].artboard, artboard);
+                // Returning to the source ruler cancels the preview and keeps the existing Redo.
+                frame(&mut app, &ctx, vec![Event::PointerMoved(from), button(from, false)]);
+                assert_eq!(&*app.session.active().unwrap().doc, &*before);
+                assert_eq!(history(&app), before_history);
+                app.session.execute("edit.redo", &json!({})).unwrap();
+                assert!(app.session.active().unwrap().doc.art_bounds().is_some());
+                assert!(app.session.active().unwrap().doc.guides.is_empty());
+            }
+        }
     }
 
     /// #451: a guide dragged out of a ruler lands on the art's side midpoints (halving an
@@ -3008,6 +3251,74 @@ mod tests {
         assert!(!app.canvas.moved);
     }
 
+    /// When the view turns while the worker renders the frame at the new angle (Reset Rotate View on
+    /// a heavy document), the canvas draws the last frame turned until that frame arrives: each
+    /// corner goes where the new view puts the document point that the corner showed. The new frame
+    /// is then drawn unturned. In Pixel Preview the last frame's pixels stay over the document rect
+    /// they cover.
+    #[test]
+    fn a_turned_view_draws_the_last_frame_turned_until_its_own_arrives() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        app.session.execute("shape.rectangle", &json!({"x": 100, "y": 50, "width": 200, "height": 200})).unwrap();
+        app.canvas.worker_started = true; // render on this thread
+        let ctx = egui::Context::default();
+        shapes(&mut app, &ctx); // the first frame fits the view to the artboard
+        app.view_mut().unwrap().rotation = 30.0;
+        shapes(&mut app, &ctx);
+        let rect = app.canvas_rect.unwrap();
+        let old = Xf::new(rect, app.view().unwrap());
+        // `art` runs one frame and finds the mesh that draws the art's texture.
+        let art = |app: &mut VectorcraftApp| {
+            let s = shapes(app, &ctx);
+            let tex = app.canvas.texture.as_ref().unwrap().id();
+            s.into_iter().find_map(|s| match s {
+                Shape::Mesh(m) if m.texture_id == tex => Some(m),
+                _ => None,
+            })
+        };
+        // With a worker and a last frame that took 50 ms, the next frame renders on the worker.
+        app.canvas.worker = crate::render_worker::Worker::spawn(ctx.clone());
+        app.canvas.last_ms = 50.0;
+        app.run("view.rotateReset", json!({})).unwrap();
+        let mesh = art(&mut app).expect("the last frame, turned");
+        assert!(app.canvas.worker.as_ref().and_then(|w| w.pending.as_ref()).is_some_and(|k| k.rot == 0.0), "sent to the worker");
+        let new = Xf::new(rect, app.view().unwrap());
+        let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+        assert_eq!(mesh.vertices.len(), 4);
+        for ((v, corner), uv) in mesh.vertices.iter().zip(corners).zip([pos2(0.0, 0.0), pos2(1.0, 0.0), pos2(1.0, 1.0), pos2(0.0, 1.0)]) {
+            let at = new.to_screen(old.to_doc(corner));
+            assert!((v.pos - at).length() < 0.01 && v.uv == uv, "{v:?}: texture corner {uv:?} at {at:?}");
+        }
+        // The point where the last frame drew the rectangle's top-left corner lands where the new view puts that corner.
+        let p = Point::new(100.0, 50.0);
+        let uv = (old.to_screen(p) - rect.min) / rect.size();
+        let [a, b, _, d] = [0, 1, 2, 3].map(|i| mesh.vertices[i].pos);
+        assert!((a + (b - a) * uv.x + (d - a) * uv.y - new.to_screen(p)).length() < 0.01, "the rectangle's corner");
+        // The worker's frame at 0° then covers the canvas unturned.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while app.canvas.key.as_ref().is_some_and(|k| k.rot != 0.0) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            shapes(&mut app, &ctx);
+        }
+        assert!(app.canvas.key.as_ref().is_some_and(|k| k.rot == 0.0), "the worker's frame arrives");
+        let b = art(&mut app).expect("the worker's frame").calc_bounds();
+        assert!((b.min - rect.min).length() < 0.01 && (b.max - rect.max).length() < 0.01, "{b:?} over {rect:?}");
+        // In Pixel Preview the last frame's pixels are drawn over the document rect they cover.
+        app.canvas.worker = None;
+        app.ui.view.pixel_preview = true;
+        app.view_mut().unwrap().zoom = 8.0;
+        shapes(&mut app, &ctx);
+        let [x0, y0, ..] = app.canvas.key.as_ref().and_then(|k| k.pixel).expect("the pixels rendered");
+        app.canvas.worker = crate::render_worker::Worker::spawn(ctx.clone());
+        app.canvas.last_ms = 50.0;
+        app.view_mut().unwrap().rotation = 30.0;
+        let mesh = art(&mut app).expect("the last frame's pixels");
+        let at = Xf::new(rect, app.view().unwrap()).to_screen(Point::new(x0 as f64, y0 as f64));
+        assert!((mesh.vertices[0].pos - at).length() < 0.01, "{:?} at {at:?}", mesh.vertices[0].pos);
+        app.canvas.worker = None;
+    }
+
     /// File Handling › Display Bitmaps as Anti-aliased Images in Pixel Preview (#394): off, Pixel
     /// Preview draws images with each pixel taking its nearest image pixel; on, smoothly, as the
     /// canvas always does out of Pixel Preview.
@@ -3401,6 +3712,149 @@ mod tests {
         assert_eq!(widget(&mut app), vec![layer]);
         app.ui.view.bounding_box = false;
         assert!(widget(&mut app).is_empty(), "no bounding box, no widget");
+    }
+
+    /// The shapes Type → Show Hidden Characters draws in one frame, seen through `xf`.
+    fn hidden_chars(app: &mut VectorcraftApp, ctx: &egui::Context, xf: &Xf) -> Vec<Shape> {
+        let raw = egui::RawInput { screen_rect: Some(xf.rect), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| hidden_chars_overlay(app, ui.painter(), xf));
+        out.textures_delta.clear();
+        out.shapes.into_iter().map(|c| c.shape).collect()
+    }
+
+    /// Show Hidden Characters lays out type once: a frame keeps the marks of the frame before, and
+    /// after an edit only the object edited is laid out again.
+    #[test]
+    fn show_hidden_characters_lays_out_only_type_that_changed() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        let ids: Vec<_> = (0..3)
+            .map(|i| app.session.execute("text.create", &json!({"x": 20, "y": 40 + 80 * i, "text": "a b\nc d"})).unwrap()["id"].as_u64().unwrap())
+            .map(vectorcraft_doc::NodeId)
+            .collect();
+        let ctx = egui::Context::default();
+        let xf = Xf { rect: egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), zoom: 1.0, center: Point::new(200.0, 150.0), rot: 0.0 };
+        // `frame` draws one frame and returns each object's marks and whether that frame found the
+        // fonts and hyphenation exceptions of the frame before.
+        let frame = |app: &mut VectorcraftApp| {
+            let inputs = app.canvas.hidden_chars.inputs.clone();
+            hidden_chars(app, &ctx, &xf);
+            let kept = &app.canvas.hidden_chars;
+            (kept.inputs == inputs, ids.iter().map(|id| kept.marks[id].1.clone()).collect::<Vec<_>>())
+        };
+        // `frames` draws a frame, runs `edit` and draws the next frame. Tests running alongside add
+        // fonts and set hyphenation exceptions, which lays all type out again: `frames` draws both
+        // frames again until neither the fonts nor the exceptions changed in between.
+        let frames = |app: &mut VectorcraftApp, edit: &dyn Fn(&mut VectorcraftApp)| {
+            (0..100)
+                .find_map(|_| {
+                    let (_, before) = frame(app);
+                    edit(app);
+                    let (same, after) = frame(app);
+                    same.then_some((before, after))
+                })
+                .unwrap()
+        };
+        let same = |a: &std::sync::Arc<HiddenMarks>, b: &std::sync::Arc<HiddenMarks>| std::sync::Arc::ptr_eq(a, b);
+        let (before, after) = frames(&mut app, &|_| {});
+        assert!(before.iter().zip(&after).all(|(a, b)| same(a, b)), "a frame lays out no type");
+        let (before, after) = frames(&mut app, &|app| {
+            app.session.execute("text.setText", &json!({"id": ids[1].0, "text": "a b c"})).unwrap();
+        });
+        assert!(!same(&before[1], &after[1]), "the edited object is laid out again");
+        assert!(same(&before[0], &after[0]) && same(&before[2], &after[2]), "the others are not");
+    }
+
+    /// The marks Show Hidden Characters keeps follow the type: after an edit, a zoom and a font
+    /// that arrives, a frame draws what a new overlay draws, and the marks moved.
+    #[test]
+    fn show_hidden_characters_follows_edits_zooms_and_fonts() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        // The type is set in Bold of a family that is not installed and whose name starts with a
+        // dot; the font menus do not list such names. Source Sans 3 Bold stands in for it until the
+        // family arrives below with a Regular face only.
+        let text = json!({"x": 20, "y": 60, "text": "one two\nthree four", "font": ".Hidden Marks", "style": "Bold"});
+        let id = app.session.execute("text.create", &text).unwrap()["id"].clone();
+        let ctx = egui::Context::default();
+        let mut xf = Xf { rect: egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)), zoom: 1.0, center: Point::new(200.0, 150.0), rot: 0.0 };
+        // `drawn` draws a frame with what the overlay kept and checks it against a new overlay.
+        let drawn = |app: &mut VectorcraftApp, xf: &Xf| {
+            let kept = hidden_chars(app, &ctx, xf);
+            app.canvas.hidden_chars = Default::default();
+            assert_eq!(hidden_chars(app, &ctx, xf), kept, "as a new overlay draws them");
+            kept
+        };
+        let start = drawn(&mut app, &xf);
+        assert!(start.len() > 2, "{start:?}");
+        app.session.execute("text.setText", &json!({"id": id, "text": "one two three\nfour"})).unwrap();
+        let edited = drawn(&mut app, &xf);
+        assert_ne!(edited, start, "the edit moved the marks");
+        xf.zoom = 2.0;
+        let zoomed = drawn(&mut app, &xf);
+        assert_ne!(zoomed, edited, "zoomed in");
+        assert!(vectorcraft_text::FontDb::global().add_font(vectorcraft_testkit::fonts::renamed(".Hidden Marks")) > 0, "the family is new");
+        assert_ne!(drawn(&mut app, &xf), zoomed, "set in the family that arrived");
+    }
+
+    /// The shapes Type → Show Hidden Characters draws in one canvas frame ([`show`]).
+    fn hidden_char_marks(app: &mut VectorcraftApp, ctx: &egui::Context) -> Vec<Shape> {
+        let blue = Color32::from_rgb(0x4f, 0x9d, 0xff);
+        shapes(app, ctx)
+            .into_iter()
+            .filter(|s| matches!(s, Shape::Circle(c) if c.fill == blue) || matches!(s, Shape::Text(t) if t.fallback_color == blue))
+            .collect()
+    }
+
+    /// While Show Hidden Characters is on, a canvas frame keeps the marks of the frame before.
+    /// Turning it off drops the marks with their text nodes, and turning it on again draws the
+    /// same marks.
+    #[test]
+    fn show_hidden_characters_off_releases_the_text_nodes() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        let text = json!({"x": 20, "y": 60, "text": "one two\nthree four"});
+        let id = vectorcraft_doc::NodeId(app.session.execute("text.create", &text).unwrap()["id"].as_u64().unwrap());
+        let ctx = egui::Context::default();
+        app.run("type.hiddenCharacters", json!({})).unwrap();
+        let on = hidden_char_marks(&mut app, &ctx);
+        assert!(on.len() > 2, "{on:?}");
+        // Tests running alongside add fonts and set hyphenation exceptions, which lays all type out
+        // again: frames are drawn until neither changed between two of them.
+        let kept = (0..100).any(|_| {
+            let (inputs, marks) = (app.canvas.hidden_chars.inputs.clone(), app.canvas.hidden_chars.marks[&id].1.clone());
+            hidden_char_marks(&mut app, &ctx);
+            let after = &app.canvas.hidden_chars;
+            after.inputs == inputs && std::sync::Arc::ptr_eq(&after.marks[&id].1, &marks)
+        });
+        assert!(kept, "a frame keeps the marks of the frame before");
+        app.run("type.hiddenCharacters", json!({})).unwrap();
+        assert!(hidden_char_marks(&mut app, &ctx).is_empty(), "off");
+        assert!(app.canvas.hidden_chars.marks.is_empty(), "no node is kept");
+        app.run("type.hiddenCharacters", json!({})).unwrap();
+        assert_eq!(hidden_char_marks(&mut app, &ctx), on, "on again: the same marks");
+    }
+
+    /// Closing the document drops the marks Show Hidden Characters kept with its text nodes, and
+    /// the same type in a new document shows the same marks.
+    #[test]
+    fn show_hidden_characters_releases_the_text_nodes_of_a_closed_document() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        app.run("type.hiddenCharacters", json!({})).unwrap();
+        let open = |app: &mut VectorcraftApp| {
+            app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+            app.session.execute("text.create", &json!({"x": 20, "y": 60, "text": "one two\nthree four"})).unwrap();
+            hidden_char_marks(app, &ctx)
+        };
+        let first = open(&mut app);
+        assert!(first.len() > 2, "{first:?}");
+        assert_eq!(app.canvas.hidden_chars.marks.len(), 1, "the marks are kept with the text object's node");
+        app.session.execute("file.close", &json!({})).unwrap();
+        assert!(hidden_char_marks(&mut app, &ctx).is_empty(), "the Home screen");
+        assert!(app.canvas.hidden_chars.marks.is_empty(), "no node of the closed document is kept");
+        assert_eq!(open(&mut app), first, "the same type in a new document");
     }
 
     /// General › Zoom with Mouse Wheel (#394), through the control channel's `ui.wheel`: off,

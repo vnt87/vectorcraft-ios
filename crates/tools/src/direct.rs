@@ -12,6 +12,8 @@
 //! the Corners dialog).
 //! Group Selection: click selects the leaf; each further click on it adds the next enclosing group;
 //! its marquee works as Direct Selection's.
+//! In isolation mode both pick only the isolated object and what is inside it: anchors, segments,
+//! paths and groups outside it stay put.
 //! Both move objects selected as a whole as the Selection tool does, snapping alike.
 //! Both pick the key objects of a blend, and click or drag ruler guides ([`crate::rulerguide`]).
 //! Direct Selection also edits a blend's spine: drag its points (a key object on a point moves
@@ -39,7 +41,7 @@ use crate::meshedit::MeshEdit;
 use crate::pathtype::{self, BracketDrag, over_bracket};
 use crate::rulerguide::GuideEdit;
 use crate::select::{MoveSnap, is_area_type, matrix_json};
-use crate::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext};
+use crate::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext, ToolKey};
 
 #[derive(Clone, Debug)]
 enum State {
@@ -163,10 +165,28 @@ impl DirectSelectionTool {
     }
 }
 
+/// Whether `id` may be picked while `scope` is isolated: it is that object, or it sits inside it.
+/// With no isolation, everything may be picked.
+fn in_scope(doc: &vectorcraft_doc::Document, scope: Option<NodeId>, id: NodeId) -> bool {
+    scope.is_none_or(|scope| doc.ancestry(id).is_some_and(|anc| anc.contains(&scope)))
+}
+
+/// Visit the nodes Direct Selection may pick. In isolation mode that is the isolated object and
+/// its contents; art around it is locked and the walk does not reach it.
+fn walk_pickable<'a>(doc: &'a vectorcraft_doc::Document, scope: Option<NodeId>, mut f: impl FnMut(&'a Node)) {
+    if let Some(id) = scope
+        && let Some(n) = doc.node(id)
+    {
+        n.walk(&mut f);
+    } else if scope.is_none() {
+        doc.walk(f);
+    }
+}
+
 /// The spines of the editable blends, topmost first: (blend, spine).
 pub(crate) fn spines(cx: &ToolContext) -> Vec<(NodeId, PathData)> {
     let mut v = vec![];
-    cx.doc.walk(|n| {
+    walk_pickable(cx.doc, cx.isolation, |n| {
         if let NodeKind::Blend { children, spec } = &n.kind
             && let Some((path, _)) = vectorcraft_doc::live::blend_spine(children, spec)
         {
@@ -225,7 +245,7 @@ fn editable_path(n: &Node) -> Option<Cow<'_, PathData>> {
 /// The editable objects `f` accepts, topmost first.
 fn anchor_owners(cx: &ToolContext, f: fn(&Node) -> bool) -> Vec<NodeId> {
     let mut v = vec![];
-    cx.doc.walk(|n| {
+    walk_pickable(cx.doc, cx.isolation, |n| {
         if f(n) {
             v.push(n.id)
         }
@@ -341,6 +361,18 @@ impl Tool for DirectSelectionTool {
     fn options(&self) -> Value {
         self.mesh.options()
     }
+    /// Escape during a drag (anchors, handles, segments, objects, type areas, blend spines, a
+    /// marquee) cancels it: what it moved goes back and the tool waits for the next press (#1743).
+    fn key(&mut self, _cx: &ToolContext, key: ToolKey, _mods: Mods) -> Vec<Action> {
+        if key != ToolKey::Escape || matches!(self.state, State::Idle | State::Mesh | State::Corner(_) | State::Bracket(_)) {
+            return vec![];
+        }
+        self.state = State::Idle;
+        self.guides.clear();
+        (self.anchor_snap, self.copy_snap, self.move_snap) = (None, None, None);
+        (self.click, self.click_segment) = (None, None);
+        vec![Action::Cancel]
+    }
     fn pointer(&mut self, cx: &ToolContext, ev: &PointerEvent) -> Vec<Action> {
         if let Some(out) = self.guide.pointer(cx, ev) {
             return out;
@@ -359,7 +391,8 @@ impl Tool for DirectSelectionTool {
                     return vec![];
                 };
                 // Walk up from the leaf: select the first ancestor not yet selected (below the layer).
-                let chain: Vec<NodeId> = h.ancestry.iter().skip(1).rev().copied().collect();
+                // Stop at the isolated object: the next group up is outside isolation mode.
+                let chain: Vec<NodeId> = h.ancestry.iter().skip(1).rev().copied().take_while(|id| in_scope(cx.doc, cx.isolation, *id)).collect();
                 let target = if cx.selection.contains(h.leaf) {
                     chain.iter().find(|id| !cx.selection.contains(**id)).copied().unwrap_or(h.leaf)
                 } else {
@@ -677,9 +710,9 @@ impl Tool for DirectSelectionTool {
                 if r.width() < cx.tol(3.0) && r.height() < cx.tol(3.0) {
                     return if toggle { vec![] } else { vec![Action::Exec("select.none".into(), json!({}))] };
                 }
-                // Collect anchors inside the rect for every editable path.
+                // Anchors inside the rect, on editable paths inside isolation mode.
                 let mut sel: Vec<(NodeId, Vec<AnchorRef>)> = vec![];
-                cx.doc.walk(|n| {
+                walk_pickable(cx.doc, cx.isolation, |n| {
                     if let NodeKind::Path { path, .. } = &n.kind {
                         let v: Vec<AnchorRef> = path.anchors().filter(|(_, _, a)| r.contains(a.p)).map(|(s, i, _)| (s, i)).collect();
                         if !v.is_empty() {
@@ -697,7 +730,8 @@ impl Tool for DirectSelectionTool {
                 }
                 sel.retain(|(id, _)| cx.doc.is_editable(*id));
                 let items: Vec<Value> = sel.iter().map(|(id, v)| json!({"id": id.0, "anchors": anchors_json(v)})).collect();
-                vec![Action::Exec("select.anchorsMany".into(), json!({"items": items, "mode": if toggle { "toggle" } else { "set" }}))]
+                let art = Action::Exec("select.anchorsMany".into(), json!({"items": items, "mode": if toggle { "toggle" } else { "set" }}));
+                std::iter::once(art).chain(crate::rulerguide::marquee_select(cx, r)).collect()
             }
             _ => vec![],
         }
@@ -741,7 +775,7 @@ impl Tool for DirectSelectionTool {
 fn hovered_anchor(cx: &ToolContext, p: Point) -> Option<(NodeId, Point)> {
     let under = hit_test(cx.doc, p, cx.hit_options()).map(|h| h.leaf);
     let tol = cx.point_tol();
-    cx.selection.objects.iter().copied().chain(under).find_map(|id| {
+    cx.selection.objects.iter().copied().filter(|id| in_scope(cx.doc, cx.isolation, *id)).chain(under).find_map(|id| {
         let path = cx.doc.node(id).and_then(editable_path)?;
         nearest_anchor(&path, p, tol).map(|(.., a)| (id, a))
     })
@@ -1066,6 +1100,78 @@ mod tests {
         let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 250.0, 150.0));
         assert_eq!(a, vec![Action::Exec("select.anchorsMany".into(), json!({"items": [{"id": id.0, "anchors": [[0, 1]]}], "mode": "set"}))]);
     }
+
+    #[test]
+    fn marquee_selects_ruler_guides() {
+        let (mut d, id) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide::new(false, 80.0));
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = DirectSelectionTool::new(false);
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 50.0));
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 250.0, 150.0));
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 250.0, 150.0));
+        assert_eq!(
+            a,
+            vec![
+                Action::Exec("select.anchorsMany".into(), json!({"items": [{"id": id.0, "anchors": [[0, 1]]}], "mode": "set"})),
+                Action::Exec("guide.select".into(), json!({"indexes": [0], "toggle": true})),
+            ]
+        );
+    }
+
+    /// A path inside an inner group, a sibling path outside it, and the groups' ids.
+    /// The inside path is the rectangle at (100, 100); the outside one at (300, 300).
+    fn nested_group_doc() -> (vectorcraft_doc::Document, NodeId, NodeId, NodeId, NodeId) {
+        let mut d = vectorcraft_doc::Document::new(500.0, 500.0);
+        let l = d.layers[0].id;
+        let (inside, outside, inner, outer) = (d.alloc_id(), d.alloc_id(), d.alloc_id(), d.alloc_id());
+        let path = |id, x| {
+            std::sync::Arc::new(vectorcraft_doc::Node::path(
+                id,
+                vectorcraft_geom::shapes::rectangle(Rect::new(x, x, x + 100.0, x + 100.0)),
+                vectorcraft_doc::Appearance::default_art(),
+            ))
+        };
+        let inner_g = vectorcraft_doc::Node::group(inner, vec![path(inside, 100.0)]);
+        let outer_g = vectorcraft_doc::Node::group(outer, vec![std::sync::Arc::new(inner_g), path(outside, 300.0)]);
+        d.insert(Some(l), 0, outer_g).unwrap();
+        (d, inside, outside, inner, outer)
+    }
+
+    /// Isolation mode: a marquee and an anchor click take the path inside the isolated group and
+    /// leave the path beside it. Group Selection stops at the isolated group instead of adding
+    /// the group around it.
+    #[test]
+    fn isolation_mode_leaves_art_outside_the_isolated_group() {
+        let (d, inside, outside, inner, outer) = nested_group_doc();
+        let p = paint();
+        let none = Selection::default();
+        let isolated = ToolContext { isolation: Some(inner), ..cx(&d, &none, &p) };
+        let mut t = DirectSelectionTool::new(false);
+        t.pointer(&isolated, &PointerEvent::new(PointerKind::Down, 50.0, 50.0));
+        let a = t.pointer(&isolated, &PointerEvent::new(PointerKind::Up, 450.0, 450.0));
+        let items = a.first().and_then(|act| match act {
+            Action::Exec(c, v) if c == "select.anchorsMany" => v.get("items").cloned(),
+            _ => None,
+        });
+        let items = items.unwrap();
+        assert!(items.as_array().is_some_and(|a| a.iter().all(|item| item["id"] == inside.0)), "marquee: {a:?}");
+        assert!(items.as_array().is_some_and(|a| !a.is_empty()), "the path inside is still selected: {a:?}");
+
+        let a = DirectSelectionTool::new(false).pointer(&isolated, &PointerEvent::new(PointerKind::Down, 300.0, 300.0));
+        assert!(a.is_empty(), "a click on {outside:?}, outside isolation, starts a marquee: {a:?}");
+        let a = DirectSelectionTool::new(false).pointer(&isolated, &PointerEvent::new(PointerKind::Down, 100.0, 100.0));
+        assert_eq!(a, vec![Action::Exec("select.anchors".into(), json!({"id": inside.0, "anchors": [[0, 0]], "mode": "set"}))]);
+
+        let mut s = Selection::default();
+        s.set([inside, inner]);
+        let climbed = ToolContext { isolation: Some(inner), ..cx(&d, &s, &p) };
+        let a = DirectSelectionTool::new(true).pointer(&climbed, &PointerEvent::new(PointerKind::Down, 150.0, 150.0));
+        assert!(a.is_empty(), "does not add the group outside isolation ({outer:?}): {a:?}");
+    }
+
     /// #927: a marquee across type selects the type object whole, beside the anchors it holds.
     #[test]
     fn marquee_selects_type_it_touches() {
@@ -1115,6 +1221,24 @@ mod tests {
         sp.anchors[1].h_in = Point::new(200.0, 250.0);
         d.insert(Some(l), 1, vectorcraft_doc::Node::path(id, PathData::single(sp), vectorcraft_doc::Appearance::default_art())).unwrap();
         (d, id)
+    }
+
+    /// #1743: Escape mid-drag cancels it; the release after it does nothing more.
+    #[test]
+    fn escape_cancels_a_drag() {
+        let (d, _) = arch_doc();
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = DirectSelectionTool::new(false);
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 262.5));
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 240.0));
+        assert!(t.busy());
+        assert_eq!(t.key(&cx, ToolKey::Escape, Mods::default()), vec![Action::Cancel]);
+        assert!(!t.busy());
+        assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 220.0)), vec![]);
+        assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 150.0, 220.0)), vec![]);
+        assert_eq!(t.key(&cx, ToolKey::Escape, Mods::default()), vec![], "nothing to cancel");
     }
 
     #[test]

@@ -206,6 +206,24 @@ fn random_transform_is_stable_per_object_and_within_the_values() {
     assert!(close(r.width(), 50.0, 1e-9) && close(r.center().x, 90.0, 1e-9), "{r:?}");
 }
 
+/// #1705: stacked Transform effects multiply their copies; the anchors they make are bounded,
+/// whatever each one's count.
+#[test]
+fn stacked_transform_copies_stay_within_the_anchor_budget() {
+    let p = json!({"copies": 1000});
+    let b = square().bounds().unwrap();
+    let mut path = square();
+    let mut counts = vec![];
+    for _ in 0..3 {
+        path = crate::distort::transform_within(&path, b, &p, 0, 100);
+        counts.push(path.anchor_count());
+    }
+    assert_eq!(counts, [100, 100, 100], "25 squares, then no room for a copy of them");
+    // Within the budget every copy is made, and the effect's own budget takes a thousand copies.
+    assert_eq!(crate::distort::transform_within(&square(), b, &json!({"copies": 24}), 0, 100).subpaths.len(), 25);
+    assert_eq!(run("distort.transform", p, &square()).subpaths.len(), 1001);
+}
+
 #[test]
 fn transform_copies_stop_before_they_overflow() {
     let out = run("distort.transform", json!({"scaleH": 100000, "scaleV": 100000, "copies": 1000}), &square());
@@ -234,6 +252,44 @@ fn roughen_seed_changes_result_and_detail_adds_points() {
     // Displacement is bounded by size (5% of 100 = 5 pt).
     let bb = a.bounds().unwrap();
     assert!(bb.x0 > -8.0 && bb.x1 < 108.0);
+}
+
+#[test]
+fn catmull_rom_keeps_a_turn_back_smooth() {
+    // #1643: the path runs out to (10, 0) and turns back to (0.5, 0.2). The Catmull-Rom tangent
+    // `next - prev` is almost zero there; the anchor gets handles along the chords' bisector
+    // (here nearly perpendicular to them), collinear and as long as half the longer chord / 6.
+    let pts = [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(0.5, 0.2), Point::new(10.0, 5.0)];
+    let sp = util::catmull_rom(&pts, false, 1.0);
+    let a = sp.anchors[1];
+    let (hin, hout) = (a.h_in - a.p, a.h_out - a.p);
+    assert!(close(hin.x, -hout.x, 1e-9) && close(hin.y, -hout.y, 1e-9), "collinear: {a:?}");
+    assert!(close(hout.hypot(), 0.5 * 10.0 / 6.0, 1e-3), "{a:?}");
+    assert!(hout.x.abs() < 0.05 * hout.hypot(), "across the chords: {a:?}");
+    // A regular turn keeps the plain Catmull-Rom tangent.
+    let pts = [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0)];
+    let a = util::catmull_rom(&pts, false, 1.0).anchors[1];
+    let (got, want) = (a.h_out - a.p, (pts[2] - pts[0]) / 6.0);
+    assert!(close(got.x, want.x, 1e-12) && close(got.y, want.y, 1e-12), "{got:?} vs {want:?}");
+}
+
+#[test]
+fn roughen_smooth_makes_no_cusps() {
+    // #1643: wherever Roughen's jitter turns the path back, the smooth points stay smooth: no
+    // anchor's handles shrink below 1/12 of its longer chord (a cusp that PDF viewers miter).
+    let star = shapes::star(Point::new(150.0, 100.0), 70.0, 32.0, 5, 0.0);
+    for seed in 0..50 {
+        let out = run("distort.roughen", json!({"size": 3, "detail": 10, "seed": seed}), &star);
+        for sp in &out.subpaths {
+            let n = sp.anchors.len();
+            for i in 0..n {
+                let a = sp.anchors[i];
+                let (prev, next) = (sp.anchors[(i + n - 1) % n].p, sp.anchors[(i + 1) % n].p);
+                let chord = (a.p - prev).hypot().max((next - a.p).hypot());
+                assert!((a.h_out - a.p).hypot() >= chord / 12.0 - 1e-9, "seed {seed}: cusp at {:?}", a.p);
+            }
+        }
+    }
 }
 
 #[test]
@@ -352,6 +408,23 @@ fn twist_fixes_the_outer_circle_and_rotates_inside() {
     let out = apply_geometry(&[fx("distort.twist", json!({"angle": 90}))], &small, Rect::new(0.0, 0.0, 100.0, 100.0));
     let a = out.subpaths[0].anchors[0].p;
     assert!((a.y - 50.0).abs() > 1.0, "near-centre points rotate: {a:?}");
+}
+
+#[test]
+fn scribble_does_not_cross_holes() {
+    // #1648: a U (opening at the top, the notch x 30..70, y 0..60). Rows (y 2.5, 7.5, ...) through the prongs have
+    // two spans; their zig-zags must stay apart instead of crossing the notch.
+    let u = [(0.0, 0.0), (30.0, 0.0), (30.0, 60.0), (70.0, 60.0), (70.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)];
+    let u = PathData::single(SubPath::polyline(&u.map(|(x, y)| Point::new(x, y)), true));
+    let params = json!({"angle": 0, "variation": 0, "curviness": 0, "strokeWidth": 2, "spacing": 5});
+    let out = run("stylize.scribble", params, &u).to_bezpath();
+    for x in [40.0, 50.0, 60.0] {
+        for y in [12.5, 32.5, 52.5] {
+            assert_eq!(vectorcraft_geom::kurbo::Shape::winding(&out, Point::new(x, y)), 0, "scribble covers the notch at ({x}, {y})");
+        }
+    }
+    // The bar below the notch is still hatched.
+    assert_ne!(vectorcraft_geom::kurbo::Shape::winding(&out, Point::new(50.0, 82.5)), 0);
 }
 
 #[test]

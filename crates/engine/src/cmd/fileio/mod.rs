@@ -683,6 +683,7 @@ pub fn open_filters() -> impl Iterator<Item = (&'static str, &'static [&'static 
         .chain(std::iter::once(("Flattener presets", super::flatten::PRESET_EXTS)))
         .chain(std::iter::once(("PDF presets", super::pdfcmds::PRESET_EXTS)))
         .chain(std::iter::once(("Print presets", super::printpresets::PRESET_EXTS)))
+        .chain(std::iter::once(("Shortcut sets", super::shortcutset::EXTS)))
         .chain(std::iter::once(("Scripts", super::scripts::EXTS)))
         .chain(std::iter::once(("Plug-ins", super::plugin::EXTS)))
 }
@@ -1050,6 +1051,12 @@ pub(crate) fn merge(mut a: Value, b: Value) -> Value {
         a.extend(b);
     }
     a
+}
+
+/// Appearance of Black › Printing / Exporting (#394): Output All Blacks as Rich Black makes RGB
+/// raster exports draw pure CMYK black as RGB black (`richBlack` on the encoder params).
+pub(crate) fn with_black_output(s: &Session, p: &Value) -> Value {
+    if s.prefs.black_output == "rich" { merge(p.clone(), json!({ "richBlack": true })) } else { p.clone() }
 }
 
 /// A file name for bytes handed back without a path: the document's title with `ext`.

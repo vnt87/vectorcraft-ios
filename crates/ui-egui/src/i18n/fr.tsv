@@ -769,6 +769,8 @@
 	Do Not Move	Ne pas déplacer
 	Do you want to save the changes you made to “{name}”?	Voulez-vous enregistrer les modifications apportées à « {name} » ?
 	Can't open “{name}”.	Impossible d’ouvrir « {name} ».
+	Can't save “{name}”.	Impossible d’enregistrer « {name} ».
+	Can't export “{name}”.	Impossible d’exporter « {name} ».
 	Document	Document
 	Document Color Mode	Mode colorimétrique du document
 	Document Info	Informations sur le document
@@ -1299,6 +1301,7 @@
 	Ignore	Ignorer
 	Ignore Artboards (all the art as one page)	Ignorer les plans de travail (toute l’illustration sur une page)
 	Auto Grouping	Groupement automatique
+	Enhanced	Amélioré
 	Ignore Color	Ignorer la couleur
 	Ignore White	Ignorer le blanc
 	Palette:	Palette :
@@ -1389,6 +1392,42 @@
 	Keyboard Shortcut Conflicts	Conflits de raccourcis clavier
 	Keyboard Shortcut Set	Jeu de raccourcis clavier
 	Keyboard Shortcuts…	Raccourcis clavier…
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	Importer un jeu de raccourcis
+	Import Shortcut Set…	Importer un jeu de raccourcis…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Chaque entrée du fichier est mise en correspondance avec un outil, une commande ou un panneau de VectorCraft. Vérifiez les correspondances et répondez à ce qui reste.
+	Keys	Touches
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Le fichier enregistre les touches et les modificateurs sous forme de codes. Vérifiez les significations proposées et indiquez les codes encore inconnus.
+	Click, then press the key this code stands for (Esc cancels)	Cliquez, puis appuyez sur la touche que ce code représente (Échap pour annuler)
+	Press a key…	Appuyez sur une touche…
+	from your earlier imports	d’après vos importations précédentes
+	from the format's public description	d’après la description publique du format
+	not known yet	encore inconnu
+	Shortcuts	Raccourcis
+	In the File	Dans le fichier
+	In VectorCraft	Dans VectorCraft
+	Needs Attention Only	À vérifier uniquement
+	Ready	Prêt
+	Needs a choice	Choix nécessaire
+	Needs a key	Touche nécessaire
+	No equivalent	Aucun équivalent
+	Tools take a single key (optionally with Shift)	Les outils prennent une seule touche (éventuellement avec Maj)
+	A later row takes this shortcut	Une ligne suivante prend ce raccourci
+	Same item as a later row	Même élément qu’une ligne suivante
+	Start from VectorCraft Defaults	Partir des valeurs par défaut de VectorCraft
+	Add to the Current Shortcuts	Ajouter aux raccourcis actuels
+	Remember My Choices	Mémoriser mes choix
+	{ready} of {total} ready	{ready} sur {total} prêts
+	The file is too large to read in full, so only its first part is listed.	Le fichier est trop volumineux pour être lu en entier, seule sa première partie est donc listée.
+	Report copied	Rapport copié
+	Line {line}	Ligne {line}
+	Line {line}: {name}: {status}	Ligne {line}, {name}, {status}
+	Read Shortcut Set File	Lire un fichier de jeu de raccourcis
+	Import Matches	Correspondances d’importation
+	Remember Import Matches	Mémoriser les correspondances d’importation
+	Forget Import Matches	Oublier les correspondances d’importation
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	concorde avec {n} raccourci par défaut|concorde avec {n} raccourcis par défaut
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	{n} partie du fichier n’a pas été lue|{n} parties du fichier n’ont pas été lues
 	Keywords:	Mots-clés :
 	Knife	Cutter
 	Knockout Group	Groupe perçant
@@ -2767,6 +2806,7 @@
 	Snap to Glyph	Magnétisme du glyphe
 	Snap to Grid	Magnétisme de la grille
 	Snap to Pixel	Magnétisme du pixel
+	Precise Cursors	Pointeurs précis
 	Snap to Point	Magnétisme du point
 	Snapping Tolerance	Tolérance du magnétisme
 	Social Square Post 1080×1080	Publication carrée pour réseaux sociaux 1080×1080
@@ -3515,6 +3555,7 @@ axis	Both	Les deux
 @msg	Split Into Grid: select paths large enough for the grid	Découper en grille : sélectionnez des tracés assez grands pour la grille
 @msg	Targa files are RGB: colorModel rgb	Les fichiers Targa sont en RVB : colorModel rgb
 @msg	Text Wrap: select a wrap object	Habillage de texte : sélectionnez un objet d’habillage
+@msg	This shortcut file is in a form VectorCraft can't read.	Ce fichier de raccourcis est dans un format que VectorCraft ne sait pas lire.
 @msg	`aspect` must be a number (%)	`aspect` doit être un nombre (%)
 @msg	`at` must be [x, y]	`at` doit être [x, y]
 @msg	`color` must be a colour	`color` doit être une couleur
@@ -3748,6 +3789,7 @@ axis	Both	Les deux
 @msg	not a VectorCraft file: {0}	ce n’est pas un fichier VectorCraft : {0}
 @msg	not a VectorCraft shortcut set (missing `overrides`)	ce n’est pas un jeu de raccourcis VectorCraft (`overrides` manquant)
 @msg	not a graphic style library (format `{_1}`)	ce n’est pas une bibliothèque de styles graphiques (format `{_1}`)
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	ce n’est pas un jeu de raccourcis, car le texte ne commence pas par un nom précédé d’une barre oblique et une accolade ouvrante
 @msg	not a stored central record	ce n’est pas un enregistrement central stocké
 @msg	not a valid plug-in module: {0}	ce n’est pas un module de plug-in valide : {0}
 @msg	not an EMF or WMF file	ce n’est pas un fichier EMF ou WMF
@@ -3795,6 +3837,8 @@ axis	Both	Les deux
 @msg	recovery copy `{file}`: {e}	copie de récupération `{file}` : {e}
 @msg	resolutions must be between 1 and 2400 ppi	les résolutions doivent être comprises entre 1 et 2400 ppp
 @msg	result would exceed the canvas (coordinates out of range)	le résultat dépasserait la zone de travail (coordonnées hors limites)
+@msg	objects can't be nested more than 32 deep	les objets ne peuvent pas être imbriqués sur plus de 32 niveaux
+@msg	the SVG's elements are nested more than {0} deep	les éléments du SVG sont imbriqués sur plus de {0} niveaux
 @msg	scale must be a number from {_1} to {_2}, not {_3}	l’échelle doit être un nombre compris entre {_1} et {_2}, pas {_3}
 @msg	scale must be a number from {_1} to {_2}, not {s}	l’échelle doit être un nombre compris entre {_1} et {_2}, pas {s}
 @msg	select (or target) objects whose appearance isn't basic	sélectionnez (ou ciblez) des objets dont l’aspect n’est pas basique
@@ -4205,9 +4249,6 @@ effect	Soft	Doux
 	Rotation Y	Rotation Y
 	Rotation Z	Rotation Z
 	Shading	Ombrage
-	Direction	Direction
-	Elevation	Élévation
-	Ambient	Lumière ambiante
 	Segments	Segments
 	Show axis	Afficher l’axe
 	Reset all	Tout réinitialiser
@@ -4742,3 +4783,24 @@ mark-style	Japanese	Japonais
 theme	Appearance	Apparence
 	Load EPS into Clipboard	Charger un EPS dans le presse-papiers
 @msg	an image of {w} × {h} pixels is too large to draw	une image de {w} × {h} pixels est trop grande pour être dessinée
+	Fill and Stroke Controls	Commandes de fond et de contour
+	Coloring Controls	Commandes de couleur
+	Draw Mode Controls	Commandes de mode de dessin
+	Screen Mode Controls	Commandes de mode d'affichage
+	Drawer menu	Menu du tiroir
+	Toolbar: Show Controls	Barre d’outils : Afficher les commandes
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control doit être fillStroke, coloring, drawMode ou screenMode
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	commande inconnue `{name}` : fillStroke, coloring, drawMode ou screenMode
+@msg	give a fraction `t` from 0 to 1	indiquez une valeur `t` comprise entre 0 et 1
+@msg	give the path `id`	indiquez l’`id` du tracé
+@msg	invalid stroke widths	largeurs de contour non valides
+@msg	object has no weighted stroke	l’objet n’a pas de contour d’épaisseur positive valide
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Rayon d’angle unique
+	Top Left:	En haut à gauche :
+	Top Right:	En haut à droite :
+	Bottom Left:	En bas à gauche :
+	Bottom Right:	En bas à droite :
+	Softness	Douceur
+	Ambient Light	Lumière ambiante
+	Light behind the object	Lumière derrière l'objet

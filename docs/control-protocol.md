@@ -1,5 +1,7 @@
 # Control protocol
 
+> **Last updated:** 2026-10-13 · **Change:** synthetic input budgets (#1709); bounded transport waits (#1726).
+
 `vectorcraft --control <port>` listens on `127.0.0.1:<port>` (loopback only). The port must be a number
 from 1 to 65535 (`--control=<port>` works too), given once; otherwise the app prints an error and exits
 before it starts. One JSON request per line:
@@ -18,7 +20,34 @@ an object without `method`, invalid UTF-8, and a line longer than 4 MiB. An HTTP
 web page's cross-origin `fetch` to `127.0.0.1:<port>`) therefore can't smuggle a command in its body:
 its request line is rejected first. At most 16 connections are served at once; further ones get an error
 line and are closed. Clients that get an error reply should reconnect. The port has no authentication,
-so only enable it while you use it. Transport: `apps/vectorcraft/src/control_server.rs`.
+so only enable it while you use it. Idle clients have 5 minutes to start their next line; once the
+first byte arrives, the complete line must arrive within an absolute 30 seconds (trickled bytes do not
+renew it). A reply has 60 seconds to be written. Expiration closes the connection and returns its slot
+(an idle connection is closed without a line, so nothing waits where the next reply would be; a line
+that stalls gets the usual error line first);
+persistent clients can send further requests within these bounds, or reconnect after idle expiration.
+These transport budgets are separate from the existing 60-second command-processing wait.
+Transport: `apps/vectorcraft/src/control_server.rs`.
+
+## Synthetic input budgets
+
+`ui.drag` accepts at most **256** `steps`; `ui.click` and `ui.drag` accept at most **16** `count`.
+They must be non-negative JSON integers. Omitted values keep their defaults (8 steps, one click);
+explicit zero still acts as one, as before. Oversized or malformed values return an error before
+any move, press or release is queued.
+
+All synthetic methods (`ui.key`, `ui.text`, `ui.move`, `ui.click`, `ui.drag`, `ui.wheel`) share a
+**1,024-event** pending-queue limit. The whole request must fit; rejection preserves existing input
+and does not append a partial gesture. Clients can retry once earlier input has drained. At most
+**64 control requests** run per frame; later requests remain on the channel and another frame is
+scheduled. These limits cover synthetic input admission, separately from socket transport and
+command-processing timeouts.
+
+A request the app hasn't answered after **60 s** gets `{"ok": false, "error": "timeout: …"}`. If the
+app had not started it (it was busy, or its window wasn't being drawn), the request is withdrawn
+and never runs, and the error says "will not run": retrying is safe. If the app was already
+running it, the error says "still running": it may yet complete, so check the document before
+retrying.
 
 ## Confining file access
 
@@ -64,6 +93,8 @@ the two can still win that race.
 | `ui.tool.select` / `ui.tool.list` | `{tool}` | |
 | `ui.pointer` | `{events:[{kind: down|drag|up|move|doubleclick, x, y, space?: "doc"|"screen", mods?}]}` | drive the active tool exactly like the mouse: `mods.cmd` held at a press with any tool but a selection tool drags with the selection tool chosen last (Direct Selection with the Pen until one is), and the release gives the tool back as it was; the reply lists `selection`, `key` (the key object, null without one) and `tool` |
 | `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | synthetic keyboard input |
+| `ui.move` | `{x, y}` | screen-point pointer move |
+| `ui.click` / `ui.drag` | `{x, y, button?, count?, shift?, alt?, ctrl?, cmd?}` / `{x, y, toX, toY, steps?, count?, button?, shift?, alt?, ctrl?, cmd?}` | egui pointer input; see synthetic input budgets above |
 | `ui.wheel` | `{x, y, dy?, dx?, unit?: "line"\|"point", shift?, alt?, cmd?}` | a mouse wheel turn over screen point (x, y): `dy` notches up (+) or down, `dx` sideways. Over the canvas the wheel scrolls and Cmd- or Alt-wheel (Option on the Mac) zooms about the pointer; with the `zoomWithMouseWheel` preference the wheel and Alt-wheel zoom about the pointer, Shift-wheel scrolls up and down and Cmd-wheel (Ctrl on Windows and Linux) sideways. Over a focused numeric field (click it first) each notch steps its value as Up/Down do (Shift: ten, Cmd/Ctrl: a tenth) and the panel stays put; over anything else in a panel the wheel scrolls it |
 | `ui.set` | `{brightness?, panel?, rulers?, outline?, grid?, smartGuides?, boundingBox?, controlBar?}` | |
 | `ui.dialog.set` / `.confirm` / `.cancel` | `{field, value}` | fill and submit the open dialog |
@@ -76,7 +107,7 @@ the two can still win that race.
 | `engine.execute` `ui.savePdfDialog` | `{path?, preset?, range?, …document.exportPdf options}` | opens the Save PDF dialog (`file.export.pdf` with no params opens it too). Its fields are the `document.exportPdf` options: set `compatibility` with `ui.dialog.set {field: "compatibility", value: "1.5"}`, a whole section with `{field: "compression", value: {…}}`, the artboards with `__allArtboards: false` and `range`, the visible section with `__section` (General, Compression, Marks and Bleeds, Output, Advanced, Security, Summary). `ui.dialog.confirm` writes `path` (else asks for one), returns `{path, bytes, warnings}` and opens the file when `viewAfterSaving` is set |
 | `file.save` / `file.saveAs` / `file.saveCopy` / `file.saveAsTemplate` (via `engine.execute`) | `{path?, format?, options?, svg?}` | Save writes the document's own file in its own format (a document opened from or saved as SVG/PDF saves as that again; the result's `warnings` say what the format loses). With `path` the file is written at once (Save As or a Copy to an SVG path without SVG options first opens SVG Options, below). Without one (never saved, a converted older file, Save As, a Copy, a Template) the app shows a save panel with one file type per save format (`vectorcraft`, `template`, `pdf`, `svg`, `svgz`), then the format's options: SVG opens the `svgOptions` dialog (below; returns `{"pending": "svgOptions", "path"}`), PDF the `savePdf` dialog (its `__save` field names the save command); `ui.dialog.confirm` finishes the save. On the web a `saveOptions` dialog (fields `path`, `format`) first names the file and picks the format. `file.formatOptions {format?}` reads the options a save would use. `file.revert` opens a `confirm` dialog (`{"pending": "confirm"}`); `ui.dialog.confirm` reloads the saved file in the same tab |
 | SVG Options (`engine.execute` of `file.export.svg`, `file.saveAs`, `file.saveCopy`) | `{}` / `{path?, svg?: {…}}` | `file.export.svg` without params, and Save As or Save a Copy to an `.svg`/`.svgz` path without SVG options, open the `svgOptions` dialog (`ui.dialog.set` its fields: `styling`, `outlineText`, `images`, `objectIds`, `decimals`, `minify`, `responsive`, `fewerTspans`, `metadata`, `preserveEditing`, `useArtboards`, `allArtboards`, `range`, `showCode`, `profile` (`svg11`/`tiny12`), `encoding` (`utf8`/`utf16`/`latin1`), `embedFonts`; `ui.dialog.confirm` exports or saves and remembers the choices). With `svg: {…}` (the `document.formats` SVG options) they run directly. `app.save {path?, svg?}` takes the same options; a document saved as SVG saves as SVG again with the same options |
-| `engine.execute` `file.place` | `{paths?}` / `{path \| name+dataBase64, …file.place params}` | with no file, picks files and opens the `place` dialog; with `paths`, opens it for them (fields `files`, `link`, `template`, `replace`; `__replace` says whether Replace applies, `__info` describes each file). `ui.dialog.confirm` places one file centred in the view (or in place of the selected object) and loads the place cursor with several (`file.place.queue`). With a file, it runs `file.place` centred in the view. Files dropped on the window with no document open open. On the web, files dropped on the canvas are placed at the drop point (linked; Shift embeds) and files dropped off it (the tab bar) open, as in Illustrator; desktop drops carry no pointer position, so documents (native, SVG, PDF, `.ai`, EPS, DXF, EMF/WMF) open as tabs of their own and pictures and text are placed in the middle of the view. Swatch libraries and color books (`.vcswatches`, `.gpl`, `.ase`, `.acb`), graphic style libraries (`.vcstyles`), Libraries panel files (`.vclibrary`), presets (`.vcflattener`, `.vcpdfpresets`, `.vcprintpresets`, `.vcperspective`) and plug-ins (`.wasm`) open wherever they are dropped, as File › Open opens them. With the cursor loaded (`ui.inspect` → `tool: "place"`, `toolOptions: {count, current, name, names}`), `ui.pointer` clicks and drags place files and `ui.key` ←/→/↑/↓ and Escape cycle and discard them |
+| `engine.execute` `file.place` | `{paths?}` / `{path \| name+dataBase64, …file.place params}` | with no file, picks files and opens the `place` dialog; with `paths`, opens it for them (fields `files`, `link`, `template`, `replace`; `__replace` says whether Replace applies, `__info` describes each file). `ui.dialog.confirm` places one file centred in the view (or in place of the selected object) and loads the place cursor with several (`file.place.queue`). With a file, it runs `file.place` centred in the view. Files dropped on the window with no document open open. On the web, files dropped on the canvas are placed at the drop point (linked; Shift embeds) and files dropped off it (the tab bar) open, as in Illustrator; desktop drops carry no pointer position, so documents (native, SVG, PDF, `.ai`, EPS, DXF, EMF/WMF) open as tabs of their own and pictures and text are placed in the middle of the view. Swatch libraries and color books (`.vcswatches`, `.gpl`, `.ase`, `.acb`), graphic style libraries (`.vcstyles`), Libraries panel files (`.vclibrary`), presets (`.vcflattener`, `.vcpdfpresets`, `.vcprintpresets`, `.vcperspective`), plug-ins (`.wasm`) and shortcut sets (`.kys`, in Import Shortcut Set) open wherever they are dropped, as File › Open opens them. With the cursor loaded (`ui.inspect` → `tool: "place"`, `toolOptions: {count, current, name, names}`), `ui.pointer` clicks and drags place files and `ui.key` ←/→/↑/↓ and Escape cycle and discard them |
 | `app.export` raster options | `{path?, format: png \| jpg \| webp, ppi?, background?, antiAlias?, interlaced?, quality?}` | `ppi` sets the pixel size (72 = one pixel per point) and is stored in the file; `background` is `transparent`, `white`, `black` or `"#rrggbb"`; `antiAlias` is `none`, `art` or `type` (text snapped to pixels); `interlaced` writes an Adam7 PNG. The PNG Options dialog (`pngOptions`; `jpgOptions` / `webpOptions` for the other raster formats) has the same fields: fill them with `ui.dialog.set` and press OK with `ui.dialog.confirm` |
 | `app.export` JPEG options | `{path?, format: jpg, quality?: 0–100, colorModel?: rgb \| cmyk \| gray, method?: baseline \| optimized \| progressive, scans?: 3–5, embedIcc?, imageMap?: none \| client \| server}` | `cmyk` writes ink amounts in the working CMYK space (CMYK colours keep their inks; RGB ones are separated with the colour settings); `embedIcc` (default true) embeds sRGB, the working CMYK profile or a grey profile, generated by the CMS; `imageMap` also writes `<stem>.html` (client-side `<map>`) or `<stem>.map` (NCSA) beside the image for the objects with a URL and an Image Map shape (`attributes.set`), returned in `linked`. The `jpgOptions` dialog has these fields too (`quality` is shown 0–10; a CMYK document defaults to `cmyk`) |
 | `app.export` PNG-8 and GIF | `{path?, format: png8 \| gif, colors?: 2–256, reduction?: perceptual \| selective \| adaptive \| web \| blackWhite \| gray, dither?: none \| diffusion \| pattern \| noise, ditherAmount?: 0–100, transparency?, matte?, interlaced?, …raster options}` | a palette of at most `colors` entries (art with that many colours or fewer keeps them exactly); pixels under half opacity become one transparent entry unless `transparency` is false, partly transparent edges are blended over `matte` (`none` keeps their colour). `png8` writes an indexed `.png` (1–8 bits per pixel); Export for Screens rows take both. The `png8Options` / `gifOptions` dialogs have these fields |
@@ -261,7 +292,12 @@ drawer beside the toolbar; Escape or a click outside closes it. While it is open
 toolbar to add it (onto a button's top or bottom edge: its own slot before or after; onto its middle: into its
 group), from the toolbar into it to remove it, or within the toolbar to move it. `toolbar.addTool {tool, slot?,
 place?}`, `toolbar.removeTool {tool, group?}` and `toolbar.reset` do the same for the current Basic or Advanced
-toolbar and return its slots; the edits (`ui.toolbar_edits`) are saved with the preferences.
+toolbar and return its slots; the edits (`ui.toolbar_edits`) are saved with the preferences. The drawer lists
+the tools one per row (icon, name, shortcut), each flyout group framed together under its heading; its ☰ menu
+has Reset and the Basic and Advanced toolbars. Its Show section (`toolbar.show {control?, on?}`, `control` one
+of `fillStroke`, `coloring`, `drawMode`, `screenMode`) shows or hides the controls under the toolbar's tools,
+saved with the preferences (`ui.toolbar_show`). The toolbar names its groups only with Preferences › User
+Interface › Show Tool Group Labels, off as it ships (#1736).
 
 The Contextual Task Bar: its handle (the grip at its left end) drags it anywhere on the canvas, which always holds
 it whole, also when the window shrinks. Unpinned, the bar keeps that offset as it follows the selection, until
@@ -792,3 +828,22 @@ resizes the root divider (`false`/`true` path entries select first/second childr
 `SetStackOpen {panel,open}` / `ResizeStack {panel,height}` control accordion entries.
 The UI dispatches these same commands. Unknown panel IDs, invalid geometry, and stale
 split paths return an error without changing the workspace.
+
+## Synthetic input hardening checklist
+
+- [x] Validate counts and reserve the whole gesture before queue mutation.
+- [x] Bound pending events across all synthetic methods, preserving rejected requests' prior queue.
+- [x] Yield after a finite control-request batch per frame; retain later requests and schedule another frame.
+
+## Transport hardening checklist
+
+- [x] Bound idle, partial-line and reply-write waits without renewing a partial-line deadline per byte.
+- [x] Release connection slots on worker exit, including timeout and failed worker creation.
+- [x] Preserve correlated replies and persistent connections within the transport budgets.
+
+## Revision history
+
+| Date | Change | Summary |
+|---|---|---|
+| 2026-10-13 | minor | Documented count, pending-event and per-frame request budgets (#1709). |
+| 2026-10-13 | minor | Documented transport deadlines and connection-slot recovery (#1726). |

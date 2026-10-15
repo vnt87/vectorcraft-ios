@@ -18,10 +18,13 @@ use crate::{ImportOptions, SvgError, fnv1a};
 use css::XNode;
 use text::TextSlots;
 
+pub use depth::MAX_ELEMENT_DEPTH;
+pub(crate) use depth::xml_too_deep;
 pub(crate) use fx::BLEND;
 
 mod css;
 mod css_transform;
+mod depth;
 mod files;
 mod fx;
 mod spread;
@@ -29,11 +32,30 @@ mod symbol_units;
 mod text;
 mod vector_effect;
 
+/// The XML of `svg`.
+fn parse(svg: &str) -> Result<roxmltree::Document<'_>, SvgError> {
+    roxmltree::Document::parse_with_options(svg, roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() })
+        .map_err(|e| SvgError::Parse(e.to_string()))
+}
+
 pub(crate) fn import(svg: &str, opts: &ImportOptions) -> Result<(Document, Vec<String>), SvgError> {
-    let (svg, found) = prepass(svg, opts);
+    // Before anything reads the tree: the XML reader, usvg, and what is made of its tree, all by
+    // recursion.
+    let too_deep = || SvgError::TooDeep(depth::MAX_ELEMENT_DEPTH);
+    if depth::xml_too_deep(svg) {
+        return Err(too_deep());
+    }
+    let xml = parse(svg)?;
+    if depth::too_deep(&xml) {
+        return Err(too_deep());
+    }
+    let (svg, found) = prepass(svg, &xml, opts);
+    // The prepass's edits are in the text: the XML is read again only when it made any.
+    let xml = match &svg {
+        Cow::Borrowed(_) => xml,
+        Cow::Owned(edited) => parse(edited)?,
+    };
     let svg = svg.as_ref();
-    let xml = roxmltree::Document::parse_with_options(svg, roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() })
-        .map_err(|e| SvgError::Parse(e.to_string()))?;
     let units = RootUnits::of(xml.root_element());
     let root_name = root_layer_name(xml.root_element());
     let mut warnings = found.warnings;
@@ -165,6 +187,7 @@ pub(crate) fn import(svg: &str, opts: &ImportOptions) -> Result<(Document, Vec<S
             promote_sublayers(Arc::make_mut(l), &im.sublayer_groups);
         }
     }
+    im.doc.limit_depth_noting(&mut im.warnings);
     Ok((im.doc, im.warnings))
 }
 
@@ -476,6 +499,9 @@ pub(super) struct Edits {
     list: Vec<(std::ops::Range<usize>, String)>,
     /// The ids made up so far, by element.
     ids: HashMap<roxmltree::NodeId, String>,
+    /// Declarations added to elements' `style`s, by element: (where they go, whether the element
+    /// has a `style` attribute, the declarations, XML-escaped).
+    styles: HashMap<roxmltree::NodeId, (usize, bool, String)>,
 }
 
 impl Edits {
@@ -505,9 +531,24 @@ impl Edits {
         }
     }
 
+    /// Add the declaration `decl` (XML-escaped already) to the `style` of element `n` (in `svg`),
+    /// after the ones already there (so it wins over them and over style sheet rules).
+    fn style(&mut self, svg: &str, n: XNode, decl: &str) {
+        let (_, _, decls) =
+            self.styles.entry(n.id()).or_insert_with(|| match n.attributes().find(|a| a.name() == "style" && a.namespace().is_none()) {
+                Some(a) => (a.range_value().end, true, String::new()),
+                None => (tag_name_end(svg, n), false, String::new()),
+            });
+        decls.push(';');
+        decls.push_str(decl);
+    }
+
     /// `svg` with the edits made; overlapping ones and ranges off character boundaries are
     /// skipped.
     fn apply(mut self, svg: &str) -> Cow<'_, str> {
+        for (at, has_style, decls) in std::mem::take(&mut self.styles).into_values() {
+            self.insert(at, if has_style { decls } else { format!(" style=\"{}\"", decls.strip_prefix(';').unwrap_or(&decls)) });
+        }
         if self.list.is_empty() {
             return svg.into();
         }
@@ -534,19 +575,19 @@ impl Edits {
 ///   to come back hidden; one something links to (a `<use>` template) stays as it is;
 /// * shapes with a non-scaling stroke get an id when they have none, recorded ([`vector_effect`]);
 /// * linked files are read ([`files`]);
-/// * percentage lengths in a `<symbol>` with a `viewBox` become numbers ([`symbol_units`]).
-fn prepass<'s>(svg: &'s str, opts: &ImportOptions) -> (Cow<'s, str>, Found) {
+/// * percentage lengths in a `<symbol>` with a `viewBox` become numbers ([`symbol_units`]);
+/// * what style sheet rules with a `:not()` set goes in `style` attributes ([`not_rules`]).
+fn prepass<'s>(svg: &'s str, xml: &roxmltree::Document, opts: &ImportOptions) -> (Cow<'s, str>, Found) {
     let mut found = Found::default();
     // (`:` for prefixed elements such as `<svg:image>`.)
     let css_transform = has_css_transform(svg);
+    let not = svg.contains(":not(");
     if !css_transform
+        && !not
         && !["<a", "display", "<use", ":use", "<image", ":image", vector_effect::NON_SCALING, "data-", "groupmode"].iter().any(|t| svg.contains(t))
     {
         return (svg.into(), found);
     }
-    let Ok(xml) = roxmltree::Document::parse_with_options(svg, roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() }) else {
-        return (svg.into(), found);
-    };
     let mut edits = Edits::default();
     let elements = || xml.descendants().filter(|n| n.is_element());
     for a in elements().filter(|n| n.tag_name().name() == "a") {
@@ -570,21 +611,25 @@ fn prepass<'s>(svg: &'s str, opts: &ImportOptions) -> (Cow<'s, str>, Found) {
         }
     }
     let (display, non_scaling) = (svg.contains("display"), svg.contains(vector_effect::NON_SCALING));
-    if display || non_scaling {
-        let css = css::Styles::new(&xml);
+    if display || non_scaling || not {
+        let css = css::Styles::new(xml);
+        // First: an undisplayed object shown for usvg is shown after these.
+        if not && css.has_not_rules() {
+            not_rules(svg, xml, &css, &mut edits);
+        }
         if display {
-            hidden_objects(svg, &xml, &css, &mut edits, &mut found.hidden);
+            hidden_objects(svg, xml, &css, &mut edits, &mut found.hidden);
         }
         if non_scaling {
-            vector_effect::find(svg, &xml, &css, &mut edits, &mut found.non_scaling, &mut found.warnings);
+            vector_effect::find(svg, xml, &css, &mut edits, &mut found.non_scaling, &mut found.warnings);
         }
     }
-    found.files = files::Files::read(svg, &xml, opts, &mut edits, &mut found.warnings);
+    found.files = files::Files::read(svg, xml, opts, &mut edits, &mut found.warnings);
     if !symbols.is_empty() && svg.contains('%') {
-        edits.list.extend(symbol_units::rewrites(&xml));
+        edits.list.extend(symbol_units::rewrites(xml));
     }
     if css_transform {
-        edits.list.extend(css_transform::rewrites(svg, &xml));
+        edits.list.extend(css_transform::rewrites(svg, xml));
     }
     (edits.apply(svg), found)
 }
@@ -592,6 +637,18 @@ fn prepass<'s>(svg: &'s str, opts: &ImportOptions) -> (Cow<'s, str>, Found) {
 /// Is there a `transform` CSS declaration in `svg` (`transform` followed by `:`)?
 fn has_css_transform(svg: &str) -> bool {
     svg.match_indices("transform").any(|(i, t)| svg.get(i + t.len()..).is_some_and(|s| s.trim_start().starts_with(':')))
+}
+
+/// usvg's style sheets drop rules with a `:not()` selector (#1557). The properties such rules set
+/// on an element go in its `style` attribute, with the value that wins the cascade there (which
+/// can be another rule's or the attribute's own), so usvg reads what CSS would.
+fn not_rules(svg: &str, xml: &roxmltree::Document, css: &css::Styles, edits: &mut Edits) {
+    for n in xml.descendants().filter(XNode::is_element) {
+        for (name, value) in css.set_by_not_rules(n) {
+            let value = if name == "transform" { css_transform::to_svg(&value).unwrap_or(value) } else { value };
+            edits.style(svg, n, &crate::xml_escape(&format!("{name}:{value}")));
+        }
+    }
 }
 
 /// The elements that are objects (what [`hidden_objects`] shows).
@@ -615,10 +672,7 @@ fn hidden_objects(svg: &str, xml: &roxmltree::Document, css: &css::Styles, edits
         }
         ids.insert(edits.id(svg, n));
         // A `style` declaration wins over the attribute and style sheet rules.
-        match n.attributes().find(|a| a.name() == "style" && a.namespace().is_none()) {
-            Some(a) => edits.insert(a.range_value().end, ";display:inline".to_string()),
-            None => edits.insert(tag_name_end(svg, n), " style=\"display:inline\"".to_string()),
-        }
+        edits.style(svg, n, "display:inline");
     }
 }
 

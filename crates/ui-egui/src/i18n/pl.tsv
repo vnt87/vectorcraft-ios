@@ -489,6 +489,7 @@
 	Three Point Perspective	Perspektywa trzypunktowa
 	Save Grid as Preset…	Zapisz siatkę jako ustawienie…
 	Snap to Pixel	Przyciągaj do pikseli
+	Precise Cursors	Precyzyjne kursory
 	Snap to Point	Przyciągaj do punktów
 	Snap to Glyph	Przyciągaj do glifów
 	New View…	Nowy widok…
@@ -729,10 +730,7 @@
 	Rotation Y	Obrót Y
 	Rotation Z	Obrót Z
 	Shading	Cieniowanie
-	Direction	Kierunek
-	Elevation	Wysokość
 	Intensity	Natężenie
-	Ambient	Otoczenie
 	Segments	Segmenty
 	Show axis	Pokaż oś
 	Reset all	Resetuj wszystko
@@ -1380,6 +1378,7 @@ lighting	Light	Światło
 	Black and White	Czarno-biały
 	Corners	Narożniki
 	Auto Grouping	Automatyczne grupowanie
+	Enhanced	Ulepszone
 	Ignore Color	Ignoruj kolor
 	Ignore White	Ignoruj biel
 	Palette:	Paleta:
@@ -3392,6 +3391,8 @@ effect	Regular	Normalny
 	Serif / Mincho	Szeryfowe / mincho
 	Changes made since it was last saved will be lost.	Zmiany wprowadzone od ostatniego zapisu zostaną utracone.
 	Can't open “{name}”.	Nie można otworzyć „{name}”.
+	Can't save “{name}”.	Nie można zapisać „{name}”.
+	Can't export “{name}”.	Nie można wyeksportować „{name}”.
 	Downloaded {what}	Pobrano {what}
 	Exported {count} file(s) to {folder}	Wyeksportowane pliki do {folder}: {count}
 	Exported {what}	Wyeksportowano {what}
@@ -3918,6 +3919,8 @@ imageTrace	Outline	Kontur
 @msg	not a DXF drawing	to nie jest rysunek DXF
 @msg	not a VectorCraft file: {0}	to nie jest plik VectorCraft: {0}
 @msg	not a VectorCraft shortcut set (missing `overrides`)	to nie jest zestaw skrótów VectorCraft (brak `overrides`)
+@msg	not a shortcut set: the text doesn't start with a slash name and an opening brace	to nie jest zestaw skrótów: tekst nie zaczyna się od nazwy z ukośnikiem i otwierającego nawiasu klamrowego
+@msg	This shortcut file is in a form VectorCraft can't read.	Ten plik skrótów ma postać, której VectorCraft nie potrafi odczytać.
 @msg	not a graphic style library (format `{_1}`)	to nie jest biblioteka stylów graficznych (format `{_1}`)
 @msg	not a stored central record	to nie jest zapisany rekord centralny
 @msg	not a valid plug-in module: {0}	nieprawidłowy moduł wtyczki: {0}
@@ -3966,6 +3969,8 @@ imageTrace	Outline	Kontur
 @msg	recovery copy `{file}`: {e}	kopia odzyskiwania `{file}`: {e}
 @msg	resolutions must be between 1 and 2400 ppi	rozdzielczości muszą mieścić się w zakresie od 1 do 2400 ppi
 @msg	result would exceed the canvas (coordinates out of range)	wynik wykroczyłby poza płótno (współrzędne poza zakresem)
+@msg	objects can't be nested more than 32 deep	obiektów nie można zagnieżdżać głębiej niż na 32 poziomy
+@msg	the SVG's elements are nested more than {0} deep	elementy SVG są zagnieżdżone głębiej niż na {0} poziomów
 @msg	scale must be a number from {_1} to {_2}, not {_3}	skala musi być liczbą od {_1} do {_2}, nie {_3}
 @msg	scale must be a number from {_1} to {_2}, not {s}	skala musi być liczbą od {_1} do {_2}, nie {s}
 @msg	select (or target) objects whose appearance isn't basic	zaznacz (lub wskaż) obiekty, których wygląd nie jest podstawowy
@@ -4316,6 +4321,42 @@ imageTrace	Outline	Kontur
 	⚠ {chord} was already used by {names} — it has been removed there.	Uwaga: skrót {chord} był już używany przez {names} — został tam usunięty.
 	VectorCraft Defaults	Domyślne VectorCraft
 @plural	{n} shortcut is assigned more than once|{n} shortcuts are assigned more than once	{n} skrót jest przypisany więcej niż raz|{n} skróty są przypisane więcej niż raz|{n} skrótów jest przypisanych więcej niż raz
+# Import Shortcut Set (Keyboard Shortcuts › Import…, File › Open of a .kys file) and its commands.
+	Import Shortcut Set	Importuj zestaw skrótów
+	Import Shortcut Set…	Importuj zestaw skrótów…
+	Each entry of the file is matched to a VectorCraft tool, command or panel. Check the matches and answer what is left.	Każdy wpis pliku zostaje dopasowany do narzędzia, polecenia lub panelu VectorCraft. Sprawdź dopasowania i uzupełnij pozostałe.
+	Keys	Klawisze
+	The file writes keys and modifiers as codes. Check the proposed meanings and answer the codes that are not known yet.	Plik zapisuje klawisze i modyfikatory jako kody. Sprawdź proponowane znaczenia i uzupełnij kody, które nie są jeszcze znane.
+	Click, then press the key this code stands for (Esc cancels)	Kliknij, a następnie naciśnij klawisz oznaczany tym kodem (Esc anuluje)
+	Press a key…	Naciśnij klawisz…
+	from your earlier imports	z wcześniejszych importów
+	from the format's public description	z publicznego opisu formatu
+	not known yet	jeszcze nieznany
+	Shortcuts	Skróty
+	In the File	W pliku
+	In VectorCraft	W VectorCraft
+	Needs Attention Only	Tylko wymagające uwagi
+	Ready	Gotowe
+	Needs a choice	Wymaga wyboru
+	Needs a key	Wymaga klawisza
+	No equivalent	Brak odpowiednika
+	Tools take a single key (optionally with Shift)	Narzędzia przyjmują pojedynczy klawisz (opcjonalnie z Shift)
+	A later row takes this shortcut	Ten skrót przejmuje dalszy wiersz
+	Same item as a later row	Ten sam element co w dalszym wierszu
+	Start from VectorCraft Defaults	Zacznij od domyślnych skrótów VectorCraft
+	Add to the Current Shortcuts	Dodaj do bieżących skrótów
+	Remember My Choices	Zapamiętaj moje wybory
+	{ready} of {total} ready	Gotowe: {ready} z {total}
+	The file is too large to read in full, so only its first part is listed.	Plik jest zbyt duży, aby odczytać go w całości, dlatego wyświetlana jest tylko jego pierwsza część.
+	Report copied	Skopiowano raport
+	Line {line}	Wiersz {line}
+	Line {line}: {name}: {status}	Wiersz {line}: {name}: {status}
+	Read Shortcut Set File	Odczytaj plik zestawu skrótów
+	Import Matches	Dopasowania importu
+	Remember Import Matches	Zapamiętaj dopasowania importu
+	Forget Import Matches	Zapomnij dopasowania importu
+@plural	agrees with {n} default shortcut|agrees with {n} default shortcuts	zgadza się z {n} domyślnym skrótem|zgadza się z {n} domyślnymi skrótami|zgadza się z {n} domyślnymi skrótami
+@plural	{n} part of the file wasn't read|{n} parts of the file weren't read	{n} część pliku nie została odczytana|{n} części pliku nie zostały odczytane|{n} części pliku nie zostało odczytanych
 	Simulate prints overprints as Overprint Preview shows them; separations always keep them. A preset flattens transparency before printing (PostScript files always flatten it).	Symuluj drukuje nadruki tak, jak pokazuje je Podgląd nadruku; rozbarwienia zawsze je zachowują. Ustawienie spłaszcza przezroczystość przed drukowaniem (pliki PostScript zawsze ją spłaszczają).
 	Preserve	Zachowaj
 	Simulate	Symuluj
@@ -4588,3 +4629,25 @@ mark-style	Japanese	Japońskie
 @msg	unknown parameter `{key}`; the command takes: {keys}	nieznany parametr `{key}`; polecenie przyjmuje: {keys}
 	Load EPS into Clipboard	Wczytaj EPS do schowka
 @msg	an image of {w} × {h} pixels is too large to draw	obraz o wymiarach {w} × {h} pikseli jest zbyt duży, aby go narysować
+	Basic	Podstawowy
+	Fill and Stroke Controls	Elementy sterujące wypełnieniem i obrysem
+	Coloring Controls	Elementy sterujące kolorem
+	Draw Mode Controls	Elementy sterujące trybem rysowania
+	Screen Mode Controls	Elementy sterujące trybem ekranu
+	Drawer menu	Menu szuflady
+	Toolbar: Show Controls	Pasek narzędzi: Pokaż elementy sterujące
+@msg	control must be fillStroke, coloring, drawMode or screenMode	control musi mieć wartość fillStroke, coloring, drawMode lub screenMode
+@msg	unknown control `{name}`: fillStroke, coloring, drawMode or screenMode	nieznany element sterujący `{name}`: fillStroke, coloring, drawMode lub screenMode
+@msg	give a fraction `t` from 0 to 1	podaj wartość `t` od 0 do 1
+@msg	give the path `id`	podaj `id` ścieżki
+@msg	invalid stroke widths	nieprawidłowe szerokości obrysu
+@msg	object has no weighted stroke	obiekt nie ma obrysu o prawidłowej dodatniej grubości
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Jeden promień narożników
+	Top Left:	Lewy górny:
+	Top Right:	Prawy górny:
+	Bottom Left:	Lewy dolny:
+	Bottom Right:	Prawy dolny:
+	Softness	Miękkość
+	Ambient Light	Światło otoczenia
+	Light behind the object	Światło za obiektem

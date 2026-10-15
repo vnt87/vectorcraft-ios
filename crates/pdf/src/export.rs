@@ -4,12 +4,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use craft_pdf::write::backend as krilla;
+use craft_pdf::write::{self, Metadata};
 use krilla::color::separation::{Color as SepColor, SeparationColorant, SeparationSpace};
 use krilla::color::{cmyk, luma, rgb};
-use krilla::configure::{Archival, ConfigurationBuilder, PdfVersion};
+use krilla::configure::{Archival, PdfVersion};
 use krilla::geom::{Path, PathBuilder, Size, Transform};
 use krilla::image::Image;
-use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
 use krilla::paint::{Fill, LinearGradient, RadialGradient, SpreadMethod, Stop, Stroke, StrokeDash};
@@ -17,7 +18,7 @@ use krilla::surface::Surface;
 use krilla::text::{Glyph, GlyphId, KrillaGlyph};
 use kurbo::{PathEl, Shape, Vec2};
 use vectorcraft_color::{BlendMode, Color, GradientKind, Paint};
-use vectorcraft_doc::{AppearanceItem, Document, LineCap, LineJoin, Node, NodeKind, StrokeAlign, StrokeLayer, TextObject};
+use vectorcraft_doc::{AppearanceItem, Document, LineCap, LineJoin, Node, NodeKind, StrokeAlign, StrokeLayer, SymbolBoxes, TextObject};
 use vectorcraft_effects::stroke::{self, WrittenShape};
 use vectorcraft_geom::{Affine, BezPath, FillRule, Rect};
 use vectorcraft_text::TextLayout;
@@ -37,6 +38,10 @@ pub fn export(doc: &Document, opts: &PdfOptions) -> Result<Vec<u8>, PdfError> {
 /// Like [`export`], also returning warnings: options accepted but not applied yet (see
 /// [`crate::PdfSettings::warnings`]) and features approximated or dropped.
 pub fn export_with_report(doc: &Document, opts: &PdfOptions) -> Result<ExportReport, PdfError> {
+    write::guard(|| export_with_report_inner(doc, opts))
+}
+
+fn export_with_report_inner(doc: &Document, opts: &PdfOptions) -> Result<ExportReport, PdfError> {
     let set = &opts.settings;
     set.check()?;
     // Live geometry effects export as their result; raster effects are reported below.
@@ -52,7 +57,7 @@ pub fn export_with_report(doc: &Document, opts: &PdfOptions) -> Result<ExportRep
     let mut warnings = set.warnings();
     let native = opts.native.as_deref().filter(|_| set.preserve_editing);
     if let Some(native) = native {
-        w.pdf.embed_file(crate::editing::embedded_file(native, set.compression.compress_text, created_at.map(date_time)));
+        w.pdf.document_mut().embed_file(crate::editing::embedded_file(native, set.compression.compress_text, created_at.map(date_time)));
     } else if set.preserve_editing {
         warnings.push("Preserve editing needs the native document, which wasn't given: the PDF reopens as plain artwork".into());
     }
@@ -123,7 +128,7 @@ pub fn page_areas(doc: &Document, opts: &PdfOptions) -> Result<Vec<Rect>, PdfErr
 /// A PDF being written, shared by export and print: the file's configuration and metadata, then
 /// its pages ([`Self::page`]), each drawn by an [`Exporter`].
 pub(crate) struct Writer {
-    pub pdf: krilla::Document,
+    pub pdf: write::Writer,
     /// How colours are written (the Output settings).
     pub out: Arc<ColorOut>,
     /// Groups blend in CMYK (a CMYK document's composite, or converting to CMYK; see
@@ -180,12 +185,9 @@ impl Writer {
             Compatibility::Pdf17 => PdfVersion::Pdf17,
             Compatibility::Pdf20 => PdfVersion::Pdf20,
         };
-        let mut cb = ConfigurationBuilder::new().with_version(version);
         // `check` has refused the standards (and standard/version pairs) the writer can't produce.
-        if set.standard == Standard::PdfA2b {
-            cb = cb.with_archival_validator(Archival::A2_B);
-        }
-        let configuration = cb.finish().map_err(|e| PdfError::Write(format!("{e:?}")))?;
+        let archival = (set.standard == Standard::PdfA2b).then_some(Archival::A2_B);
+        let configuration = write::configuration(version, archival)?;
         let settings = krilla::SerializeSettings {
             compress_content_streams: set.compression.compress_text,
             no_device_cs: out.tagged,
@@ -194,27 +196,19 @@ impl Writer {
             ..Default::default()
         };
 
-        let mut pdf = krilla::Document::new_with(settings);
-        let mut meta = Metadata::new().creator("VectorCraft".into()).producer("VectorCraft".into());
-        if !title.is_empty() {
-            meta = meta.title(title.to_string());
-        }
-        // File Info.
+        // File Info normalization stays with the application.
         let info = &doc.metadata;
         let given = |s: &str| Some(s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
-        if let Some(a) = given(&info.author) {
-            meta = meta.authors(vec![a]);
-        }
-        if let Some(d) = given(&info.description) {
-            meta = meta.description(d);
-        }
-        if !info.keywords.is_empty() {
-            meta = meta.keywords(info.keywords.clone());
-        }
-        if let Some(t) = created.map(date_time) {
-            meta = meta.creation_date(t);
-        }
-        pdf.set_metadata(meta);
+        let metadata = Metadata {
+            creator: "VectorCraft".into(),
+            producer: "VectorCraft".into(),
+            title: Some(title.to_owned()),
+            authors: given(&info.author).into_iter().collect(),
+            description: given(&info.description),
+            keywords: info.keywords.clone(),
+            created: created.map(date_time),
+        };
+        let pdf = write::Writer::new(settings, metadata);
         Ok(Self { pdf, cmyk: out.blends_cmyk(cmyk), out: Arc::new(out), lab_spots: vec![], warnings, pdf13: set.pdf13() })
     }
 
@@ -223,7 +217,7 @@ impl Writer {
         let (w, h) = sheet.size;
         let size = Size::from_wh(w.max(1.0) as f32, h.max(1.0) as f32).ok_or_else(|| PdfError::BadSetting(format!("page size {w} × {h}")))?;
         let at = |b: Rect| krilla::geom::Rect::from_ltrb(b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32);
-        let mut page = self.pdf.start_page_with(PageSettings::new(size).with_trim_box(at(sheet.trim)).with_bleed_box(at(sheet.bleed)));
+        let mut page = self.pdf.document_mut().start_page_with(PageSettings::new(size).with_trim_box(at(sheet.trim)).with_bleed_box(at(sheet.bleed)));
         let mut s = page.surface();
         let paper = Rect::new(0.0, 0.0, w, h);
         if sheet.negative {
@@ -313,7 +307,7 @@ impl Writer {
     /// standard) and the warnings of its drawing. PDF/X-1a spot colours keep their CMYK
     /// alternates.
     pub(crate) fn finish(mut self) -> Result<(Vec<u8>, Vec<String>), PdfError> {
-        let mut bytes = self.pdf.finish().map_err(|e| PdfError::Write(format!("{e:?}")))?;
+        let mut bytes = self.pdf.finish()?;
         if self.cmyk {
             cmyk_blending(&mut bytes, self.out.tagged);
         }
@@ -432,6 +426,11 @@ fn date_time(t: i64) -> krilla::metadata::DateTime {
 
 pub(crate) struct Exporter<'a> {
     doc: &'a Document,
+    /// The art boxes of `doc`'s symbols, which the walk measures symbol instances by when it
+    /// leaves out objects outside the page ([`SymbolBoxes::quick`]). The box of an instance whose
+    /// art holds brushed strokes grows by as far as their brush art can paint
+    /// ([`SymbolBoxes::with_brush_art`]).
+    symbols: SymbolBoxes<'a>,
     warnings: Vec<String>,
     images: HashMap<String, Option<Image>>,
     /// The brush library, parsed when the first brushed stroke is written.
@@ -484,6 +483,7 @@ impl<'a> Exporter<'a> {
     pub(crate) fn new(doc: &'a Document, set: &'a crate::PdfSettings) -> Self {
         Self {
             doc,
+            symbols: doc.symbol_boxes().quick().with_brush_art(),
             warnings: vec![],
             images: HashMap::new(),
             brushes: None,
@@ -907,7 +907,7 @@ impl Exporter<'_> {
         self.warn("knockout groups are written as soft-masked groups (same look, but not editable as knockout groups)");
         let elements: Vec<_> = Node::knockout_elements(children)
             .into_iter()
-            .filter(|c| c.visual_bounds().is_some_and(|b| rects_overlap(b.inflate(1.0, 1.0), page)))
+            .filter(|c| c.visual_bounds_with(&self.symbols).is_some_and(|b| rects_overlap(b.inflate(1.0, 1.0), page)))
             .collect();
         let Some((first, rest)) = elements.split_first() else { return };
         for c in rest.iter().rev() {
@@ -971,7 +971,7 @@ impl Exporter<'_> {
         {
             return;
         }
-        match n.visual_bounds() {
+        match n.visual_bounds_with(&self.symbols) {
             Some(b) if !force && !rects_overlap(b.inflate(1.0, 1.0), page) => return,
             None if !n.is_container() => return,
             _ => {}
@@ -1330,7 +1330,7 @@ impl Exporter<'_> {
         let doc = self.doc;
         let brushes = self.brushes.get_or_insert_with(|| vectorcraft_brush::library(doc));
         let Some(b) = st.brush.as_deref().and_then(|name| brushes.iter().find(|b| b.name == name)) else { return false };
-        let art = vectorcraft_brush::stroke_pieces(b, bp, st);
+        let art = vectorcraft_brush::stroke_pieces(doc, b, bp, st);
         let mut pushes = 0;
         if st.blend != BlendMode::Normal {
             s.push_blend_mode(blend(st.blend));
@@ -1572,13 +1572,13 @@ impl Exporter<'_> {
             Embedding::Subset => {
                 // A named instance of a variable font is embedded instanced (its own outlines and
                 // widths, not the default instance's).
-                let coords: Vec<(krilla::text::Tag, f32)> = face.variations().iter().map(|(t, v)| (krilla::text::Tag::new(t), *v)).collect();
-                let font =
-                    krilla::text::Font::new_variable(face.file_data().to_vec().into(), face.face_index(), &coords).map(|f| (f, face.units_per_em()));
-                if font.is_none() {
-                    self.warn(format!("the font “{name}” can't be embedded: its text is exported as outlines"));
+                match write::font(face.file_data(), face.face_index(), Some(face.variations())) {
+                    Ok(font) => Some((font, face.units_per_em())),
+                    Err(error) => {
+                        self.warn(format!("the font “{name}” can't be embedded ({error}): its text is exported as outlines"));
+                        None
+                    }
                 }
-                font
             }
             Embedding::Whole => {
                 self.warn(format!(

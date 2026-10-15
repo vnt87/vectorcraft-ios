@@ -152,6 +152,39 @@ fn shape_builder_regions_query() {
     assert!(regs.iter().any(|x| x["sources"].as_array().unwrap().len() == 2));
 }
 
+/// #1691: four circles in a 2×2 grid, each touching its neighbours, enclose a diamond nothing
+/// fills. It is a region, and a drag from a circle into it merges the two.
+#[test]
+fn shape_builder_merges_the_gap_touching_circles_enclose() {
+    let mut s = session();
+    let mut circles = vec![];
+    for (x, y) in [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0), (100.0, 100.0)] {
+        let r = s.execute("shape.ellipse", &json!({"x": x, "y": y, "width": 100, "height": 100})).unwrap();
+        circles.push(NodeId(r["id"].as_u64().unwrap()));
+    }
+    set_fill(&mut s, circles[0], Color::rgb(1.0, 0.0, 0.0));
+    s.execute("select.set", &json!({"ids": circles.iter().map(|i| i.0).collect::<Vec<_>>()})).unwrap();
+    let r = s.execute("shapeBuilder.regions", &json!({})).unwrap();
+    let regs = r["regions"].as_array().unwrap();
+    assert_eq!(regs.len(), 5, "{regs:?}");
+    assert_eq!(regs.iter().filter(|x| x["sources"].as_array().unwrap().is_empty()).count(), 1, "the diamond");
+    let r = s.execute("shapeBuilder.merge", &json!({"points": [[50, 50], [100, 100]]})).unwrap();
+    assert_eq!(r["regions"], 2);
+    let out = ids(&r);
+    assert_eq!(out.len(), 4, "the merged shape and the three other circles");
+    let merged = NodeId(r["merged"].as_u64().unwrap());
+    // A circle (its Bézier outline: 7,854.9) and the diamond between the four (2,145.1).
+    assert!((area(&s, merged) - 10000.0).abs() < 10.0, "{}", area(&s, merged));
+    assert_eq!(node(&s, merged).appearance.fill_paint(), Paint::solid(Color::rgb(1.0, 0.0, 0.0)), "the look of the circle the drag began on");
+    assert_eq!(layer_children(&s), 4);
+    // A click in the diamond alone makes it a shape of its own.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.set", &json!({"ids": circles.iter().map(|i| i.0).collect::<Vec<_>>()})).unwrap();
+    let r = s.execute("shapeBuilder.merge", &json!({"points": [[100, 100]]})).unwrap();
+    assert_eq!(ids(&r).len(), 5);
+    assert!((area(&s, NodeId(r["merged"].as_u64().unwrap())) - 2146.0).abs() < 10.0);
+}
+
 #[test]
 fn shape_builder_tool_drives_the_command() {
     let mut s = session();
@@ -737,6 +770,18 @@ fn image_trace_auto_grouping_groups_what_is_inside() {
         (0..120).flat_map(|x| (0..80).map(move |y| (x, y))).map(|(x, y)| img.pixel(x, y)).collect::<Vec<_>>()
     };
     assert_eq!(shot(&s), shot(&flat));
+    // In black and white too, where the white inside the ring is a path traced before the ring:
+    // it stays under the ring in their group (over it, the ring's inner edge would show a seam).
+    let bw = |grouping: bool| {
+        let mut s = session();
+        add_image(&mut s, &art, Affine::IDENTITY);
+        let r = s.execute("imageTrace.make", &json!({"params": {"autoGrouping": grouping}})).unwrap();
+        let groups = traced_paths(&node(&s, NodeId(r["id"].as_u64().unwrap()))).iter().filter(|n| matches!(n.kind, NodeKind::Group { .. })).count();
+        (s, groups)
+    };
+    let (grouped, flat) = (bw(true), bw(false));
+    assert!(grouped.1 > 0 && flat.1 == 0);
+    assert_eq!(shot(&grouped.0), shot(&flat.0));
     // Traced again without the option, it is flat again; expanded, the groups stay.
     let r = s.execute("imageTrace.make", &json!({"preset": "6 Colors", "params": {"ignoreWhite": true}})).unwrap();
     assert_eq!(traced_paths(&node(&s, NodeId(r["id"].as_u64().unwrap()))).len(), 3);
@@ -771,6 +816,29 @@ fn image_trace_gradients_fills_with_a_gradient() {
     assert!((a.x - 50.0).abs() < 3.0 && (b.x - 250.0).abs() < 3.0 && (a.y - b.y).abs() < 2.0, "{geom:?}");
     let flat = make(false);
     assert!(flat.len() > 1 && flat.iter().all(|n| matches!(n.appearance.fill_paint(), Paint::Solid { .. })));
+}
+
+/// A preset's enhanced version: the preset with Auto Grouping and Shapes, under the preset's name.
+#[test]
+fn image_trace_enhanced_presets() {
+    let mut s = session();
+    image_doc(&mut s);
+    let r = s.execute("imageTrace.make", &json!({"preset": "6 Colors", "enhanced": true})).unwrap();
+    let n = node(&s, NodeId(r["id"].as_u64().unwrap()));
+    let stored = n.extras().trace.clone().unwrap();
+    assert_eq!(stored["preset"], "6 Colors");
+    assert_eq!((stored["params"]["shapes"].as_bool(), stored["params"]["autoGrouping"].as_bool()), (Some(true), Some(true)));
+    // The disc of the test image is a live ellipse, in a group with nothing (it has nothing inside).
+    let shapes: Vec<_> = traced_paths(&n).into_iter().filter(|c| matches!(&c.kind, NodeKind::Path { live: Some(_), .. })).collect();
+    assert_eq!(shapes.len(), 1);
+    // Listed with each preset; the legacy preset is as it was.
+    let list = s.execute("imageTrace.presets", &json!({})).unwrap();
+    let six = list["presets"].as_array().unwrap().iter().find(|p| p["name"] == "6 Colors").unwrap().clone();
+    assert_eq!((six["params"]["shapes"].as_bool(), six["enhanced"]["shapes"].as_bool()), (Some(false), Some(true)));
+    assert_eq!(list["presets"].as_array().unwrap().iter().find(|p| p["name"] == "High Fidelity Photo").unwrap()["enhanced"]["shapes"], false);
+    assert!(s.execute("imageTrace.make", &json!({"preset": "No Such", "enhanced": true})).is_err());
+    // Flat Logo, a preset of our own, has no enhanced version.
+    assert!(list["presets"].as_array().unwrap().iter().find(|p| p["name"] == "Flat Logo").unwrap()["enhanced"].is_null());
 }
 
 #[test]
@@ -874,7 +942,8 @@ fn image_trace_create_strokes_makes_stroked_centre_lines() {
     assert!(line.appearance.fill_paint().color().is_none(), "not filled");
     let st = line.appearance.items.iter().find_map(|i| if let AppearanceItem::Stroke(st) = i { Some(st) } else { None }).expect("stroked");
     assert!((st.width - 6.0).abs() < 1.0, "3 px at 2× is about 6 pt: {}", st.width);
-    assert_eq!((st.cap, st.join), (LineCap::Round, LineJoin::Round));
+    // (The line is cut square at its ends, and so is its stroke.)
+    assert_eq!((st.cap, st.join), (LineCap::Square, LineJoin::Round));
     assert_eq!(st.paint, Paint::solid(Color::rgb8(0, 0, 0)));
     let sp = &line.path_data().unwrap().subpaths[0];
     assert!(!sp.closed);

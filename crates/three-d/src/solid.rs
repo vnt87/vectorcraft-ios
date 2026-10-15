@@ -9,9 +9,9 @@
 //! Visibility is a painter's algorithm, as for Revolve: faces of a closed solid that face away
 //! from the viewer are left out, the rest are drawn back to front.
 
-use vectorcraft_geom::{BezPath, ParamCurve, PathData, Point, Rect};
+use vectorcraft_geom::{BezPath, FillRule, ParamCurve, PathData, Point, Rect};
 
-use crate::{MAX_FACES, Revolve, V3};
+use crate::{MAX_FACES, Revolve, V3, eye_distance, perspective_scale};
 
 /// The view shared by every 3D effect: rotation, perspective and one directional light.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,11 +19,13 @@ pub struct View {
     pub rotation_x: f64,
     pub rotation_y: f64,
     pub rotation_z: f64,
-    /// Perspective strength, 0 for orthographic projection, up to 1.
+    /// Perspective, 0° (none) to 160°, as Revolve's.
     pub perspective: f64,
-    pub light_azimuth: f64,
-    pub light_elevation: f64,
+    pub light_rotation: f64,
+    pub light_height: f64,
+    pub light_behind: bool,
     pub light_intensity: f64,
+    pub light_softness: f64,
     pub ambient: f64,
     pub shade: bool,
 }
@@ -36,9 +38,11 @@ impl Default for View {
             rotation_y: r.rotation_y,
             rotation_z: r.rotation_z,
             perspective: r.perspective,
-            light_azimuth: r.light_azimuth,
-            light_elevation: r.light_elevation,
+            light_rotation: r.light_rotation,
+            light_height: r.light_height,
+            light_behind: r.light_behind,
             light_intensity: r.light_intensity,
+            light_softness: r.light_softness,
             ambient: r.ambient,
             shade: r.shade,
         }
@@ -53,9 +57,11 @@ impl View {
             rotation_y: self.rotation_y,
             rotation_z: self.rotation_z,
             perspective: self.perspective,
-            light_azimuth: self.light_azimuth,
-            light_elevation: self.light_elevation,
+            light_rotation: self.light_rotation,
+            light_height: self.light_height,
+            light_behind: self.light_behind,
             light_intensity: self.light_intensity,
+            light_softness: self.light_softness,
             ambient: self.ambient,
             shade: self.shade,
             ..Revolve::default()
@@ -284,7 +290,11 @@ fn pieces(c: vectorcraft_geom::CubicBez, tolerance: f64) -> u32 {
 /// outlines run one way and holes the other, so nonzero winding fills them as the art is. Curves
 /// are followed within a tolerance of 1/2000 of `size` (at least 0.05 pt), so small curves take
 /// few points and large ones more; more than `limit` points in all is refused.
-fn rings(path: &PathData, size: f64, limit: usize) -> Result<Vec<Vec<Point>>, String> {
+///
+/// Under the nonzero `rule` an outline with filled art on both sides is no edge of the shape and
+/// is left out: a contour inside another that runs the same way doesn't cut a hole, as it would
+/// if nesting alone decided (#1724).
+fn rings(path: &PathData, rule: FillRule, size: f64, limit: usize) -> Result<Vec<Vec<Point>>, String> {
     let tolerance = (size / 2000.0).max(0.05);
     let mut count = 0;
     let mut out = vec![];
@@ -318,6 +328,18 @@ fn rings(path: &PathData, size: f64, limit: usize) -> Result<Vec<Vec<Point>>, St
         if ring.len() >= 3 && signed_area(&ring).abs() > 1e-9 {
             out.push(ring);
         }
+    }
+    if rule == FillRule::NonZero {
+        let turn = |r: &[Point]| if signed_area(r) > 0.0 { 1 } else { -1 };
+        let mut edge = Vec::with_capacity(out.len());
+        for (i, r) in out.iter().enumerate() {
+            let p = r.first().copied().unwrap_or_default();
+            // The winding number just outside the ring, and just inside it.
+            let outside: i32 = out.iter().enumerate().filter(|(j, o)| *j != i && contains(o, p)).map(|(_, o)| turn(o)).sum();
+            edge.push((outside != 0) != (outside + turn(r) != 0));
+        }
+        let mut edge = edge.into_iter();
+        out.retain(|_| edge.next().unwrap_or(true));
     }
     // A ring inside an odd number of others is a hole.
     let holes: Vec<bool> = out
@@ -389,7 +411,10 @@ fn inset(ring: &[Point], w: f64) -> Vec<Point> {
 struct Camera {
     view: Revolve,
     origin: Point,
-    distance: f64,
+    /// The eye's distance in front of the centre; `None` without perspective.
+    eye: Option<f64>,
+    /// Deeper than any part of the object: faces drawn first go this far behind it.
+    far: f64,
     light: V3,
 }
 
@@ -398,7 +423,7 @@ impl Camera {
         let view = view.revolve();
         let [lx, ly, lz] = view.light_direction();
         let size = (bounds.width() / 2.0).max(bounds.height() / 2.0).max(depth / 2.0).max(1.0);
-        Self { view, origin: bounds.center(), distance: 4.0 * size, light: V3(lx, ly, lz) }
+        Self { view, origin: bounds.center(), eye: eye_distance(view.perspective, size), far: 16.0 * size, light: V3(lx, ly, lz) }
     }
     fn rotate(&self, v: V3) -> V3 {
         self.view.rotate(v)
@@ -408,17 +433,17 @@ impl Camera {
         self.rotate(V3(p.x - self.origin.x, p.y - self.origin.y, z))
     }
     fn project(&self, v: V3) -> Point {
-        let f = self.distance / (self.distance - v.2 * self.view.perspective);
+        let f = perspective_scale(self.eye, v.2);
         Point::new(self.origin.x + v.0 * f, self.origin.y + v.1 * f)
     }
     /// The cosine between a face's outward unit normal `n` and the direction from `at` (both in
     /// view space) to the eye: positive when the face is turned towards the viewer.
     fn facing(&self, at: V3, n: V3) -> f64 {
-        let to_eye = if self.view.perspective > 0.0 { V3(0.0, 0.0, self.distance / self.view.perspective).sub(at).unit() } else { V3(0.0, 0.0, 1.0) };
+        let to_eye = self.eye.map_or(V3(0.0, 0.0, 1.0), |e| V3(0.0, 0.0, e).sub(at).unit());
         n.dot(to_eye)
     }
     fn brightness(&self, n: V3) -> f64 {
-        if self.view.shade { (self.view.ambient + self.view.light_intensity * n.dot(self.light).max(0.0)).clamp(0.0, 1.0) } else { 1.0 }
+        crate::brightness(&self.view, n, self.light)
     }
 }
 
@@ -461,7 +486,7 @@ impl Builder<'_> {
         if contours.iter().map(|c| signed_area(c).abs()).sum::<f64>() < 1e-10 {
             return Ok(());
         }
-        let depth = if behind { centre.2 - 4.0 * self.camera.distance } else { centre.2 };
+        let depth = if behind { centre.2 - self.camera.far } else { centre.2 };
         self.facets.push(Facet { contours, depth, brightness: self.camera.brightness(n) });
         if self.facets.len() > MAX_FACES {
             return Err("The 3D surface is too complex; simplify the shape".into());
@@ -625,14 +650,14 @@ fn steps(o: &Extrude) -> Vec<Step> {
 
 /// Extrude & Bevel: the shape's outline extruded backwards, with optional twist, taper, bevels
 /// and caps.
-pub fn extrude(path: &PathData, bounds: Rect, options: Extrude, view: View) -> Result<Vec<Facet>, String> {
+pub fn extrude(path: &PathData, rule: FillRule, bounds: Rect, options: Extrude, view: View) -> Result<Vec<Facet>, String> {
     check_bounds(bounds)?;
     let o = options.sanitized();
     // No depth: the flat shape, seen from either side.
     if o.depth <= 0.0 {
-        return plane(path, bounds, view);
+        return plane(path, rule, bounds, view);
     }
-    let rings = rings(path, bounds.width().max(bounds.height()), MAX_SOLID_POINTS)?;
+    let rings = rings(path, rule, bounds.width().max(bounds.height()), MAX_SOLID_POINTS)?;
     let camera = Camera::new(view, bounds, o.depth);
     let mut b = Builder { camera: &camera, closed: o.cap, facets: vec![] };
     let steps = steps(&o);
@@ -666,9 +691,9 @@ pub fn extrude(path: &PathData, bounds: Rect, options: Extrude, view: View) -> R
 
 /// Rotate: the flat art turned in 3D about the centre of `bounds` (which may be larger than the
 /// shape's own, so that every part of one object turns about the same point).
-pub fn plane(path: &PathData, bounds: Rect, view: View) -> Result<Vec<Facet>, String> {
+pub fn plane(path: &PathData, rule: FillRule, bounds: Rect, view: View) -> Result<Vec<Facet>, String> {
     check_bounds(bounds)?;
-    let rings = rings(path, bounds.width().max(bounds.height()), MAX_PLANE_POINTS)?;
+    let rings = rings(path, rule, bounds.width().max(bounds.height()), MAX_PLANE_POINTS)?;
     let camera = Camera::new(view, bounds, 0.0);
     let mut b = Builder { camera: &camera, closed: false, facets: vec![] };
     let contours: Vec<Vec<V3>> = rings.iter().map(|r| r.iter().map(|p| camera.place(*p, 0.0)).collect()).collect();
@@ -988,18 +1013,18 @@ fn material(outline: &PathData, cell: Rect) -> Option<Vec<Vec<Point>>> {
         &[Point::new(cell.x0, cell.y0), Point::new(cell.x1, cell.y0), Point::new(cell.x1, cell.y1), Point::new(cell.x0, cell.y1)],
         true,
     ));
-    let rule = vectorcraft_geom::FillRule::NonZero;
+    let rule = FillRule::NonZero;
     let part =
         vectorcraft_pathops::try_boolean(&r, rule, outline, rule, vectorcraft_pathops::BoolOp::Intersect, vectorcraft_pathops::DEFAULT_PRECISION)
             .ok()?;
-    rings(&part, cell.width(), MAX_PLANE_POINTS).ok()
+    rings(&part, rule, cell.width(), MAX_PLANE_POINTS).ok()
 }
 
 /// Inflate: the shape puffed out like a cushion, its edge kept where the art's outline is.
-pub fn inflate(path: &PathData, bounds: Rect, options: Inflate, view: View) -> Result<Vec<Facet>, String> {
+pub fn inflate(path: &PathData, rule: FillRule, bounds: Rect, options: Inflate, view: View) -> Result<Vec<Facet>, String> {
     check_bounds(bounds)?;
     let o = options.sanitized();
-    let rings = rings(path, bounds.width().max(bounds.height()), MAX_SOLID_POINTS)?;
+    let rings = rings(path, rule, bounds.width().max(bounds.height()), MAX_SOLID_POINTS)?;
     if rings.is_empty() {
         return Ok(vec![]);
     }

@@ -692,6 +692,8 @@
 	Divide Vertically Into	Dividir Verticalmente Em
 	Do you want to save the changes you made to “{name}”?	Deseja salvar as alterações feitas em “{name}”?
 	Can't open “{name}”.	Não é possível abrir “{name}”.
+	Can't save “{name}”.	Não é possível salvar “{name}”.
+	Can't export “{name}”.	Não é possível exportar “{name}”.
 	Document	Documento
 	Document Color Mode	Modo de Cor do Documento
 	Document Info	Informações do Documento
@@ -2303,6 +2305,7 @@
 	Snap to Glyph	Ajustar ao Glifo
 	Snap to Grid	Ajustar à Grade
 	Snap to Pixel	Ajustar ao Pixel
+	Precise Cursors	Cursores Precisos
 	Snap to Point	Ajustar ao Ponto
 	Snapping Tolerance	Tolerância de Ajuste
 	Soft Light	Luz Suave
@@ -2836,10 +2839,7 @@ imageTrace	Outline	Contorno
 	Rotation Y	Rotação Y
 	Rotation Z	Rotação Z
 	Shading	Sombreamento
-	Direction	Direção
-	Elevation	Elevação
 	Intensity	Intensidade
-	Ambient	Luz ambiente
 	Segments	Segmentos
 	Show axis	Mostrar eixo
 	Reset all	Redefinir tudo
@@ -3448,6 +3448,8 @@ axis	Both	Ambos
 @msg	recovery copy `{file}`: {e}	cópia de recuperação `{file}`: {e}
 @msg	resolutions must be between 1 and 2400 ppi	as resoluções devem estar entre 1 e 2400 ppi
 @msg	result would exceed the canvas (coordinates out of range)	o resultado excederia a tela (coordenadas fora do intervalo)
+@msg	objects can't be nested more than 32 deep	os objetos não podem ser aninhados em mais de 32 níveis
+@msg	the SVG's elements are nested more than {0} deep	os elementos do SVG estão aninhados em mais de {0} níveis
 @msg	scale must be a number from {_1} to {_2}, not {_3}	a escala deve ser um número de {_1} a {_2}, não {_3}
 @msg	scale must be a number from {_1} to {_2}, not {s}	a escala deve ser um número de {_1} a {_2}, não {s}
 @msg	select (or target) objects whose appearance isn't basic	selecione (ou direcione) objetos cuja aparência não seja básica
@@ -3747,3 +3749,14 @@ axis	Both	Ambos
 @msg	unknown parameter `{key}`; the command takes no parameters	parâmetro desconhecido `{key}`; o comando não tem parâmetros
 @msg	unknown parameter `{key}`; the command takes: {keys}	parâmetro desconhecido `{key}`; o comando aceita: {keys}
 	Load EPS into Clipboard	Carregar EPS na Área de Transferência
+	Drawer menu	Menu da gaveta
+	Toolbar: Show Controls	Barra de ferramentas: Mostrar controles
+# Corner Radius: a field per corner of a live rectangle.
+	Single Corner Radius	Raio de Canto Único
+	Top Left:	Superior Esquerdo:
+	Top Right:	Superior Direito:
+	Bottom Left:	Inferior Esquerdo:
+	Bottom Right:	Inferior Direito:
+	Softness	Suavidade
+	Ambient Light	Luz ambiente
+	Light behind the object	Luz atrás do objeto

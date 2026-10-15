@@ -35,8 +35,6 @@ mod mac_fonts;
 #[cfg(target_os = "macos")]
 mod mac_menu;
 #[cfg(target_os = "macos")]
-mod mac_save_format;
-#[cfg(target_os = "macos")]
 mod mac_window;
 #[cfg(target_os = "macos")]
 mod open_documents;
@@ -45,6 +43,7 @@ mod printing;
 #[cfg(all(windows, not(target_vendor = "win7")))]
 mod system_fonts;
 mod window;
+mod window_frame;
 mod xwayland;
 
 use vectorcraft_engine::Session;
@@ -62,6 +61,8 @@ struct App {
     graphics_lost: bool,
     /// Frames the UI has run (see [`end_before_teardown`]).
     frames: u64,
+    /// Keeps the custom title bar's window borderless (Windows, #1758).
+    window_frame: Option<window_frame::WindowFrameFn>,
 }
 
 impl eframe::App for App {
@@ -72,6 +73,11 @@ impl eframe::App for App {
         file_access::unconfined(|| self.logic_frame(ctx, frame));
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // winit gives the window its caption back when it changes the window's flags (maximize,
+        // restore, …): take it off again before the frame is laid out (#1758).
+        if let Some(window_frame) = self.window_frame.as_mut() {
+            window_frame();
+        }
         #[cfg(target_os = "macos")]
         if self.app.services.native_menu.is_some() {
             mac_menu::raw_input_hook(raw);
@@ -87,6 +93,11 @@ impl eframe::App for App {
             self.app.titlebar_inset = inset.unwrap_or(mac_window::DEFAULT_INSET);
         }
         file_access::unconfined(|| self.app.ui(ui));
+        // Preferences are written when confirmed, not only at exit: a session ended any other way
+        // (the system shutting down, the process ended or crashing) used to lose them (#1747).
+        if self.app.take_prefs_changed() {
+            file_access::unconfined(|| save_prefs(&self.app));
+        }
         // Not while a file dialog's sheet has the keyboard: its name field's composition would go.
         #[cfg(target_os = "macos")]
         if !self.app.file_dialog_open() && self.app.take_ime_discard() {
@@ -472,9 +483,10 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
             let picked = dialog.pick_files();
             Box::pin(async move { picked.await.unwrap_or_default().iter().map(path).collect() })
         }
-        PickRequest::Save(pick) => {
+        PickRequest::Save(_) => {
+            // Nothing is added to the sheet once rfd has begun it: an accessory view set then made
+            // recent macOS versions dismiss the sheet at once, so nothing could be saved (#1800).
             let picked = dialog.save_file();
-            mac_save_format::attach(window, &pick);
             Box::pin(async move { picked.await.iter().map(path).collect() })
         }
         PickRequest::Folder => {
@@ -489,6 +501,8 @@ fn start_pick(request: PickRequest, parent: &Parent, ui: &egui::Context) -> Opti
 
 /// The host's services; `ui` is woken when a file dialog answers.
 fn services(parent: Parent, ui: egui::Context) -> Services {
+    use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+    let wayland = parent.as_ref().and_then(|w| w.window_handle().ok()).is_some_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)));
     let (p1, p2, p3, p4, p5) = (parent.clone(), parent.clone(), parent.clone(), parent.clone(), parent);
     Services {
         pick_open: Some(Box::new(move |pick: &FilePick| pick_now(PickRequest::Open(pick.clone()), &p1).into_iter().next())),
@@ -498,6 +512,7 @@ fn services(parent: Parent, ui: egui::Context) -> Services {
         // dialogs run the window's events while they are open.
         start_pick: cfg!(unix).then(|| Box::new(move |request: PickRequest| start_pick(request, &p5, &ui)) as vectorcraft_ui_egui::picks::StartPick),
         dialogs_are_sheets: cfg!(target_os = "macos"),
+        wayland,
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(write_file)),
         // Background Save and Export write from a worker thread.
@@ -855,7 +870,9 @@ fn main() -> std::process::ExitCode {
                 // The first frame is due from now (`gpu::watch_first_frame`).
                 #[cfg(feature = "wgpu")]
                 created.ready();
-                Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0 }))
+                // The content and the pointer stay aligned on Windows (#1758).
+                let window_frame = window_frame::service(cc, custom_titlebar);
+                Ok(Box::new(App { app, graphics_loss, graphics_lost: false, frames: 0, window_frame }))
             }),
         )
     });

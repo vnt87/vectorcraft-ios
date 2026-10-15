@@ -59,7 +59,10 @@ pub fn fidelity(src: &Raster, out: &Raster) -> (f64, f64) {
 fn painted(tp: &TracedPath) -> BezPath {
     let bez = tp.path.to_bezpath();
     match tp.stroke {
-        Some(width) => kurbo::stroke(bez, &Stroke::new(width), &StrokeOpts::default(), 0.05),
+        Some(width) => {
+            let cap = if tp.square_caps { kurbo::Cap::Square } else { kurbo::Cap::Round };
+            kurbo::stroke(bez, &Stroke::new(width).with_caps(cap), &StrokeOpts::default(), 0.05)
+        }
         None => bez,
     }
 }
@@ -194,6 +197,8 @@ pub struct Metrics {
     pub stroke_anchors: f64,
     /// Share (%) of the art's plain shapes that came out as a shape lying within 0.6 px of it.
     pub shapes: f64,
+    /// Shapes: paths made a shape that lie more than 0.6 px off the art.
+    pub false_shapes: f64,
     /// Auto Grouping: share (%) of the paths that lie inside another.
     pub grouped: f64,
     /// Gradients: paths filled with one; and where the input is a known gradient, whether one was
@@ -209,21 +214,25 @@ pub struct Metrics {
     pub outside: f64,
 }
 
-/// The order a grouped result is painted in: each path, then those inside it.
+/// The order a grouped result is painted in: each path together with those inside it, in the
+/// order they were traced in (as the app builds its groups).
 fn draw_order(res: &TraceResult) -> Vec<usize> {
+    fn draw(i: usize, inside: &[Vec<usize>], order: &mut Vec<usize>) {
+        let below = inside[i].partition_point(|&c| c < i);
+        inside[i][..below].iter().for_each(|&c| draw(c, inside, order));
+        order.push(i);
+        inside[i][below..].iter().for_each(|&c| draw(c, inside, order));
+    }
     let mut inside = vec![vec![]; res.paths.len()];
-    let mut stack = vec![];
-    for i in (0..res.paths.len()).rev() {
+    let mut roots = vec![];
+    for i in 0..res.paths.len() {
         match res.parents.get(i).copied().flatten() {
-            Some(p) => inside[p].insert(0, i),
-            None => stack.push(i),
+            Some(p) => inside[p].push(i),
+            None => roots.push(i),
         }
     }
     let mut order = vec![];
-    while let Some(i) = stack.pop() {
-        order.push(i);
-        stack.extend(inside[i].iter().rev());
-    }
+    roots.into_iter().for_each(|i| draw(i, &inside, &mut order));
     order
 }
 
@@ -231,7 +240,7 @@ fn draw_order(res: &TraceResult) -> Vec<usize> {
 pub fn measure(input: &Input, variant: Variant, size: u32, src: &Raster, params: &TraceParams, res: &TraceResult) -> Metrics {
     let n = size as usize;
     let shapes: Vec<(BezPath, [u8; 3])> = res.paths.iter().map(|tp| (painted(tp), tp.color)).collect();
-    // Painted as the result is grouped: each path, then those inside it.
+    // Painted as the result is grouped.
     let drawn: Vec<(BezPath, [u8; 3], Option<&TracedGradient>)> =
         draw_order(res).into_iter().map(|i| (shapes[i].0.clone(), shapes[i].1, res.paths[i].gradient.as_ref())).collect();
     let (delta_mean, edge_delta) = fidelity(src, &render_painted(&drawn, [255; 3], n, n));
@@ -271,11 +280,16 @@ pub fn measure(input: &Input, variant: Variant, size: u32, src: &Raster, params:
 
     let nan = f64::NAN;
     let (mut geo_mean, mut geo_max, mut miss_max, mut corners, mut kinks, mut slivers, mut sliver_area) = (nan, nan, nan, nan, nan, nan, nan);
+    let mut false_shapes = if params.shapes { 0.0 } else { nan };
     if !matches!(input.class, Class::Tone | Class::Ramp) {
         let truth_shapes = input.scaled(size);
         let truth = Outline::new(truth_shapes.iter().map(|(p, _)| p), None);
         let traced = Outline::new(shapes.iter().map(|(p, _)| p), Some(f64::from(size)));
         (geo_mean, geo_max) = traced.distance_to(&truth);
+        // Shapes that are not the art's: a path made a shape that strays more than 0.6 px from it.
+        false_shapes =
+            res.paths.iter().filter(|tp| tp.shape.is_some() && Outline::new([&tp.path.to_bezpath()], None).distance_to(&truth).1 > 0.6).count()
+                as f64;
         miss_max = truth.distance_to(&traced).1;
 
         let true_corners = input.scaled_corners(size);
@@ -378,6 +392,7 @@ pub fn measure(input: &Input, variant: Variant, size: u32, src: &Raster, params:
         ramp_angle,
         ramp_off,
         shapes: shapes_found,
+        false_shapes,
         centre_off,
         width_off,
         stroke_anchors,

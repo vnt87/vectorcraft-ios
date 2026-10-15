@@ -38,7 +38,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
 use vectorcraft_color::cms::Cms;
-use vectorcraft_doc::{AppearanceItem, Document, Effect, Node, NodeId, NodeKind};
+use vectorcraft_doc::{AppearanceItem, Document, Effect, Node, NodeId, NodeKind, SymbolBoxes};
 use vectorcraft_effects::pixel::{Channels, PixelFx};
 use vectorcraft_effects::{self as effects, GeomContext, RasterFx};
 use vectorcraft_geom::{Affine, BezPath, FillRule, PathEl, Point, Rect, Shape, Size, Vec2};
@@ -80,6 +80,16 @@ pub(crate) fn has_object_fx(n: &Node) -> bool {
 /// Is `n` a group or layer (whose evaluated art keeps its knockout setting)?
 fn is_container(n: &Node) -> bool {
     matches!(n.kind, NodeKind::Group { .. } | NodeKind::Layer { .. })
+}
+
+/// Can the art [`Renderer::fx_art`] makes for `n` be made from live objects it evaluates? It can
+/// when `n` is a live object, and when `n` is a group or layer without a Pathfinder effect that
+/// holds live objects and whose geometry effects reshape them or whose own fills and strokes paint
+/// their evaluated outlines ([`effects::evaluate_container`]).
+fn evaluates_live(n: &Node) -> bool {
+    use vectorcraft_doc::live::{is_live, subtree_has_live};
+    let to_members = effects::has_geometry(&n.appearance.effects) || n.appearance.items.iter().any(effects::paints);
+    is_live(n) || (is_container(n) && to_members && !effects::has_pathfinder(n) && subtree_has_live(n))
 }
 
 /// What [`Renderer::raster_fx`] paints effects around.
@@ -137,10 +147,11 @@ fn item_effects(item: &AppearanceItem) -> &[Effect] {
     }
 }
 
-/// Visual bounds including geometry effects, stroke outsets and shadows/glows.
-pub(crate) fn visual_bounds(n: &Node) -> Option<Rect> {
+/// Visual bounds including geometry effects, stroke outsets and shadows/glows (symbol instances
+/// measured by their art from `symbols`).
+pub(crate) fn visual_bounds(symbols: &SymbolBoxes, n: &Node) -> Option<Rect> {
     if let Some(art) = effects::revolve_art(n).or_else(|| effects::solid_art(n)) {
-        return cull_bounds(&art).map(|b| {
+        return cull_bounds(symbols, &art).map(|b| {
             let o = effects::outset(&n.appearance.effects, b);
             b.inflate(o, o)
         });
@@ -167,35 +178,123 @@ pub(crate) fn visual_bounds(n: &Node) -> Option<Rect> {
     })
 }
 
-/// Bounds used for culling: like `Node::visual_bounds`, but aware of live effects anywhere in
-/// the subtree (a shadow can reach the view while its object is outside it).
-pub(crate) fn cull_bounds(n: &Node) -> Option<Rect> {
+/// Bounds used for culling: like `Node::visual_bounds_with`, but aware of live effects anywhere in
+/// the subtree (a shadow can reach the view while its object is outside it). Symbol instances are
+/// measured by their art from `symbols`.
+pub(crate) fn cull_bounds(symbols: &SymbolBoxes, n: &Node) -> Option<Rect> {
+    cull_bounds_in(symbols, n, true)
+}
+
+/// [`cull_bounds`] of `n`. With `after_reshape` true, the effects in the art of a symbol instance
+/// with geometry effects of its own are measured on the art as those effects reshape it
+/// ([`reshaped_art_effects_reach`]). With `after_reshape` false, they are measured on the art
+/// before those effects run ([`art_effects_reach`]), which `symbols` keeps for each symbol and
+/// linear part.
+fn cull_bounds_in(symbols: &SymbolBoxes, n: &Node, after_reshape: bool) -> Option<Rect> {
+    let inner = |c: &Node| cull_bounds_in(symbols, c, after_reshape);
     match &n.kind {
         // The object and its crop marks.
-        _ if effects::has_crop_marks(n) => effects::crop_marks_art(n).and_then(|art| cull_bounds(&art)),
+        _ if effects::has_crop_marks(n) => effects::crop_marks_art(n).and_then(|art| inner(&art)),
         // The evaluated art (its fills, strokes and geometry effects) and the raster effects' reach.
         _ if effects::has_container_appearance(n) => {
             let art = effects::evaluate_container(n);
             let art = art.as_ref().unwrap_or(n);
             let b = if art.clips() {
-                art.visual_bounds()
+                art.visual_bounds_with(symbols)
             } else {
-                art.children()?.iter().fold(None, |acc, c| vectorcraft_geom::union_opt(acc, cull_bounds(c)))
+                art.children()?.iter().fold(None, |acc, c| vectorcraft_geom::union_opt(acc, inner(c)))
             }?;
             let o = effects::outset(&n.appearance.effects, b);
             Some(b.inflate(o, o))
         }
         NodeKind::Layer { children, clip: false, .. } | NodeKind::Group { children, clip: false } => {
-            children.iter().fold(None, |acc, c| vectorcraft_geom::union_opt(acc, cull_bounds(c)))
+            children.iter().fold(None, |acc, c| vectorcraft_geom::union_opt(acc, inner(c)))
         }
-        _ if has_fx(n) => visual_bounds(n),
-        // The reshaped art (a symbol's art needs the document: its instance box stands in).
+        _ if has_fx(n) => visual_bounds(symbols, n),
+        // The reshaped art (a symbol instance's reshaped art is made from its symbol's art), grown
+        // by how far the effects in a symbol instance's art paint past that art.
         _ if has_object_fx(n) => {
-            let b = effects::reshape(n, None).and_then(|r| r.visual_bounds()).or_else(|| n.visual_bounds())?;
+            let symbol = match &n.kind {
+                NodeKind::SymbolInstance { symbol, .. } => symbols.document().symbols.iter().find(|s| s.name == *symbol).map(|s| s.art.clone()),
+                _ => None,
+            };
+            let reshaped = effects::reshape(n, symbol.as_deref());
+            let b = reshaped.as_ref().and_then(|r| r.visual_bounds_with(symbols)).or_else(|| n.visual_bounds_with(symbols))?;
+            let a = match &reshaped {
+                Some(r) if after_reshape => reshaped_art_effects_reach(symbols, n, r),
+                _ => art_effects_reach(symbols, n),
+            };
+            let a = a.max(live_content_reach(symbols, n));
+            let b = b.inflate(a, a);
             let o = effects::outset(&n.appearance.effects, b);
             Some(b.inflate(o, o))
         }
-        _ => n.visual_bounds(),
+        NodeKind::SymbolInstance { .. } => {
+            let b = n.visual_bounds_with(symbols)?;
+            let a = art_effects_reach(symbols, n);
+            Some(b.inflate(a, a))
+        }
+        _ => {
+            let b = n.visual_bounds_with(symbols)?;
+            let a = live_content_reach(symbols, n);
+            Some(b.inflate(a, a))
+        }
+    }
+}
+
+/// How far the content of live object `n` (a blend, envelope or repeat) can paint past its visual
+/// bounds: for each object in it, how far the effects in a symbol instance's art paint past that
+/// art ([`art_effects_reach`]) and how far brush art can paint ([`crate::brush_fx::pad`]), on the
+/// farthest side. 0 for any other kind of object.
+fn live_content_reach(symbols: &SymbolBoxes, n: &Node) -> f64 {
+    if !vectorcraft_doc::live::is_live(n) {
+        return 0.0;
+    }
+    let mut reach = 0.0f64;
+    n.walk(&mut |c| reach = reach.max(art_effects_reach(symbols, c) + crate::brush_fx::pad(symbols, c)));
+    reach
+}
+
+/// How far the effects in the art of symbol instance `n` (and in the art of the symbols the
+/// instances in it show) paint past that art's visual bounds, on its farthest side, measured on the
+/// art as the instance places it before its effects run: 0 when the art has no visible effects, and
+/// for any other kind of object. The reach is the same wherever the art is moved to, so the art is
+/// placed by the linear part of the instance's transform alone, and `symbols` keeps the reach for
+/// each symbol and linear part, up to a limit ([`SymbolBoxes::effects_reach`]).
+fn art_effects_reach(symbols: &SymbolBoxes, n: &Node) -> f64 {
+    let NodeKind::SymbolInstance { symbol, xf } = &n.kind else { return 0.0 };
+    if !symbols.has_effects(symbol) {
+        return 0.0;
+    }
+    let measure = |[m0, m1, m2, m3]: [f64; 4]| {
+        let past = |art: &Arc<Node>| {
+            let mut placed = (**art).clone();
+            placed.transform(Affine::new([m0, m1, m2, m3, 0.0, 0.0]), false);
+            match (cull_bounds(symbols, &placed), placed.visual_bounds_with(symbols)) {
+                (Some(c), Some(v)) => [v.x0 - c.x0, v.y0 - c.y0, c.x1 - v.x1, c.y1 - v.y1].into_iter().fold(0.0, f64::max),
+                _ => 0.0,
+            }
+        };
+        symbols.measure_art(symbol, past).unwrap_or(0.0)
+    };
+    let [m0, m1, m2, m3, _, _] = xf.as_coeffs();
+    symbols.effects_reach(symbol, [m0, m1, m2, m3], &measure)
+}
+
+/// How far the effects in the art of symbol instance `n` paint past `r`, that art as `n`'s own
+/// geometry effects reshape it ([`effects::reshape`]), on its farthest side: 0 when the art has no
+/// visible effects, and for any other kind of object. The art in `r` is measured without the raster
+/// effects of `n` that `r` carries, by [`cull_bounds_in`] with `after_reshape` false: the effects in
+/// the art of an instance in it are measured before that instance's own geometry effects run.
+fn reshaped_art_effects_reach(symbols: &SymbolBoxes, n: &Node, r: &Node) -> f64 {
+    let NodeKind::SymbolInstance { symbol, .. } = &n.kind else { return 0.0 };
+    if !symbols.has_effects(symbol) {
+        return 0.0;
+    }
+    let art = r.children().into_iter().flatten().fold(None, |acc, c| vectorcraft_geom::union_opt(acc, cull_bounds_in(symbols, c, false)));
+    match (art, r.visual_bounds_with(symbols)) {
+        (Some(c), Some(v)) => [v.x0 - c.x0, v.y0 - c.y0, c.x1 - v.x1, c.y1 - v.y1].into_iter().fold(0.0, f64::max),
+        _ => 0.0,
     }
 }
 
@@ -265,6 +364,29 @@ impl PixelEntry {
 fn linear_key(view: Affine) -> [u64; 4] {
     let c = view.as_coeffs();
     [c[0].to_bits(), c[1].to_bits(), c[2].to_bits(), c[3].to_bits()]
+}
+
+/// The raster a shadow or glow blurred by `blur` device pixels is filtered in, for content
+/// reaching `reach` (device pixels) in a view of `screen` pixels: (left, top, width, height,
+/// scale). It covers what of the reach can show in the view, the blur's spread around it
+/// included, at `scale` raster pixels a device pixel: 1, or less to stay within
+/// [`PIXEL_BUDGET`]. At a high zoom the spread of a wide blur is tens of thousands of pixels a
+/// side, whatever the size of the view (#1706). `None`: nothing to draw.
+fn filter_region(reach: Rect, screen: (u16, u16), blur: f64) -> Option<(f64, f64, u16, u16, f64)> {
+    // 3σ of the Gaussian (σ = blur / 2) in pixels, plus a pixel of antialiasing.
+    let spread = blur.max(0.0) * 1.5 + 2.0;
+    let screen = Rect::new(0.0, 0.0, f64::from(screen.0), f64::from(screen.1)).inflate(spread, spread);
+    let r = reach.inflate(spread, spread).intersect(screen);
+    let (x0, y0) = (r.x0.floor(), r.y0.floor());
+    let (rw, rh) = (r.x1.ceil() - x0, r.y1.ceil() - y0);
+    // (Also false for a reach or a blur that isn't a number.)
+    if !(rw >= 1.0 && rh >= 1.0 && rw.is_finite() && rh.is_finite()) {
+        return None;
+    }
+    let side = f64::from(u16::MAX);
+    let k = (PIXEL_BUDGET / (rw * rh)).sqrt().min(side / rw).min(side / rh).min(1.0);
+    let (w, h) = ((rw * k).floor().clamp(1.0, side), (rh * k).floor().clamp(1.0, side));
+    Some((x0, y0, w as u16, h as u16, k))
 }
 
 /// Draw `image` with its top-left at (`x`, `y`) device pixels, `1 / k` device pixels a pixel.
@@ -410,7 +532,8 @@ impl Drawn {
 /// objects in it ([`Reads::of`]): which parts of [`Inputs`] can change what its rasters show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Reads {
-    /// Pattern paints: the pattern definitions.
+    /// Pattern paints: the pattern definitions. Their art can hold anything, so content painted
+    /// with a pattern reads everything else too.
     patterns: bool,
     /// Symbol instances and type with inline graphics: the symbols' art. Symbol art can hold
     /// anything, so content that shows a symbol reads everything else too.
@@ -428,12 +551,23 @@ pub(crate) struct Reads {
 impl Reads {
     /// What the content of `n` reads.
     pub(crate) fn of(n: &Node) -> Self {
+        Self::of_all(std::iter::once(n))
+    }
+
+    /// What the content of `nodes` reads together. A pattern's art can hold anything, as a
+    /// symbol's can, so content painted with a pattern reads everything else too (#1723).
+    pub(crate) fn of_all<'a>(nodes: impl Iterator<Item = &'a Node>) -> Self {
         let mut reads = Self::default();
-        reads.add(n);
-        if reads.symbols {
+        nodes.for_each(|n| reads.add(n));
+        if reads.symbols || reads.patterns {
             return Self { patterns: true, symbols: true, images: true, brushes: true, text: true };
         }
         reads
+    }
+
+    /// Does the content read anything outside its own nodes?
+    pub(crate) fn any(self) -> bool {
+        self != Self::default()
     }
 
     fn add(&mut self, n: &Node) {
@@ -496,12 +630,14 @@ impl Inputs {
 /// ([`crate::pattern::hash_tiling`]), of the symbols' names and art and of the images' keys and
 /// pixels, and the address of the color settings. Art, pixels and previews are hashed by the
 /// addresses of their shared values, and names, keys, tiles, tile types and overlaps are hashed by
-/// value.
+/// value. The live cache keeps these inputs with each evaluated live object and with each mesh's
+/// quads (`crate::live`), and [`Renderer::fx_art`] keeps them with art that can be made from
+/// evaluated live objects.
 pub(crate) struct DocInputs {
     patterns: u64,
     symbols: u64,
     images: u64,
-    cms: usize,
+    pub(crate) cms: usize,
     /// Weak references to the values whose addresses the hashes hold: a weak reference keeps the
     /// allocation, not the value, so no other value gets one of those addresses while these
     /// inputs are kept.
@@ -742,7 +878,7 @@ impl Renderer {
         let opacity = self.opacity_of(a);
         if !f.opts.outline && (opacity < 1.0 || a.blend != vectorcraft_doc::color::BlendMode::Normal || a.isolate) {
             let blends = self.blends_through(a);
-            let bounds = if blends { self.bounds_of(a) } else { None };
+            let bounds = if blends { self.bounds_of(f.symbols, a) } else { None };
             let comp = crate::group::Composite { blend: a.blend, opacity, isolated: a.isolate, blends, bounds, ..Default::default() };
             self.group(ctx, f, comp, &mut |r, c, fr| r.draw_object_fx_art(c, fr, a, cache));
         } else {
@@ -754,9 +890,13 @@ impl Renderer {
     /// What [`Self::draw_object_fx`] draws inside the object's transparency group.
     fn draw_object_fx_art(&mut self, ctx: &mut RenderContext, f: &Frame, a: &Arc<Node>, cache: bool) {
         let art = self.fx_art(f.doc, a, cache);
+        // Art the cache did not keep is made again in the next frame.
+        let kept = cache && self.fx_arts.get(&(Arc::as_ptr(a) as usize), self.stamp).is_some_and(|e| Arc::ptr_eq(&e.1, &art));
+        let outer = self.made_again;
+        self.made_again = outer || !kept;
         // With Crop Marks, the object inside the art paints its own raster effects.
         let rfx = if effects::has_crop_marks(a) { vec![] } else { effects::raster_effects(&a.appearance.effects) };
-        match cull_bounds(&art) {
+        match cull_bounds(f.symbols, &art) {
             Some(reach) if !f.opts.outline && !rfx.is_empty() => {
                 // Feather and Inner Glow clip to the art's outline.
                 let clipped = rfx.iter().any(|x| matches!(x, RasterFx::Feather { .. } | RasterFx::InnerGlow { .. }));
@@ -764,25 +904,38 @@ impl Renderer {
                 // A symbol's art can change while the instance doesn't: no cached shadows.
                 let cache = (cache && !matches!(a.kind, NodeKind::SymbolInstance { .. })).then_some(0);
                 let content = Content { node: a, owner: Some(a), cache, reach, outline: region.as_deref().map(|r| (&r.0, r.1)) };
-                self.raster_fx(ctx, f, &content, &rfx, &mut |r, c, fr| r.draw_node(c, fr, &art, true));
+                self.raster_fx(ctx, f, &content, &rfx, &mut |r, c, fr| r.draw_fx_art(c, fr, a, &art));
                 ctx.set_transform(Affine::IDENTITY);
             }
-            _ => self.draw_node(ctx, f, &art, true),
+            _ => self.draw_fx_art(ctx, f, a, &art),
         }
+        self.made_again = outer;
     }
 
     /// The art [`Self::draw_object_fx`] draws for `a` (cached by `Arc` identity when `cache`):
     /// reshaped by its geometry effects, else type, images and paths as themselves and the others
     /// as their evaluated art (groups and layers: [`effects::evaluate_container`], keeping their
     /// knockout setting), recoloured by the colour adjustments in it ([`Self::adjusted_art`]);
-    /// without the object's transparency and effects (a path keeps its geometry effects).
+    /// without the object's transparency and effects (a path keeps its geometry effects). Art that
+    /// is made from live objects it evaluated ([`evaluates_live`]) is kept only while the inputs of
+    /// their evaluation stay the same ([`Self::live_found`]).
     fn fx_art(&mut self, doc: &vectorcraft_doc::Document, a: &Arc<Node>, cache: bool) -> Arc<Node> {
         let key = Arc::as_ptr(a) as usize;
+        let mut kept = None;
         if cache
-            && let Some((node, art)) = self.fx_arts.get(&key, self.stamp)
+            && let Some((node, art, found)) = self.fx_arts.get(&key, self.stamp)
             && Arc::ptr_eq(node, a)
         {
-            return art.clone();
+            match found {
+                None => return art.clone(),
+                Some(was) => kept = Some((art.clone(), was.0)),
+            }
+        }
+        let found = (kept.is_some() || (cache && evaluates_live(a))).then(|| self.live_found(doc, a));
+        if let Some((art, was)) = kept
+            && found.as_ref().is_some_and(|f| f.0 == was)
+        {
+            return art;
         }
         let symbol = match &a.kind {
             NodeKind::SymbolInstance { symbol, .. } => {
@@ -816,9 +969,22 @@ impl Renderer {
         let art = Arc::new(art);
         if cache {
             let bytes = crate::lru::node_bytes(&art);
-            self.fx_arts.insert(key, (a.clone(), art.clone()), bytes, self.stamp);
+            self.fx_arts.insert(key, (a.clone(), art.clone(), found), bytes, self.stamp);
         }
         art
+    }
+
+    /// Draw `art`, the art [`Self::fx_art`] made for `a`. Type art that `fx_arts` keeps for `a` is
+    /// drawn as `fx_owner`, so [`Self::draw_text`] takes its glyph geometry from `texts`.
+    fn draw_fx_art(&mut self, ctx: &mut RenderContext, f: &Frame, a: &Arc<Node>, art: &Arc<Node>) {
+        let kept =
+            matches!(art.kind, NodeKind::Text(_)) && self.fx_arts.get(&(Arc::as_ptr(a) as usize), self.stamp).is_some_and(|e| Arc::ptr_eq(&e.1, art));
+        if !kept {
+            return self.draw_node(ctx, f, art, true);
+        }
+        let outer = self.fx_owner.replace(art.clone());
+        self.draw_node(ctx, f, art, true);
+        self.fx_owner = outer;
     }
 
     /// `art` with the colour adjustments inside it applied, then `outer` (its object's own) on
@@ -1095,7 +1261,7 @@ impl Renderer {
         off.flush();
         let mut pm = vello_cpu::Pixmap::new(w, h);
         off.render(&mut pm, &mut self.resources);
-        if !self.pixel_fx.get(&old).is_some_and(|e| e.made.pixels.as_slice() == pm.data_as_u8_slice()) {
+        if self.pixel_fx.get(&old).is_none_or(|e| e.made.pixels.as_slice() != pm.data_as_u8_slice()) {
             return;
         }
         let owner = content.owner.cloned().or_else(|| self.fx_owner.clone().filter(|o| std::ptr::eq(&**o, content.node)));
@@ -1144,7 +1310,7 @@ impl Renderer {
 
     /// [`DocInputs`] for document `doc`: found once a frame (and again for another document drawn
     /// in it, such as a placed document's own), and kept while they stay the same.
-    fn doc_inputs(&mut self, doc: &Document) -> Arc<DocInputs> {
+    pub(crate) fn doc_inputs(&mut self, doc: &Document) -> Arc<DocInputs> {
         let at = (self.stamp, std::ptr::from_ref(doc) as usize);
         if let Some((seen, d)) = &self.doc_inputs
             && *seen == at
@@ -1234,18 +1400,9 @@ impl Renderer {
         if !f.mt {
             return self.inside_layer(|r| draw(r, ctx, f, composite));
         }
-        // 3σ of the Gaussian (σ = blur / 2) in pixels, plus a pixel of antialiasing.
-        let spread = blur.max(0.0) * 1.5 / f.px + 2.0;
-        let screen = Rect::new(0.0, 0.0, ctx.width() as f64, ctx.height() as f64).inflate(spread, spread);
-        let r = f.view.transform_rect_bbox(reach).inflate(spread, spread).intersect(screen);
-        let (x0, y0) = (r.x0.floor(), r.y0.floor());
-        let (w, h) = ((r.x1.ceil() - x0).min(u16::MAX as f64), (r.y1.ceil() - y0).min(u16::MAX as f64));
-        if w < 1.0 || h < 1.0 {
-            return;
-        }
-        let (w, h) = (w as u16, h as u16);
+        let Some((x0, y0, w, h, k)) = filter_region(f.view.transform_rect_bbox(reach), (ctx.width(), ctx.height()), blur / f.px) else { return };
         let mut off = f.offscreen_context(w, h);
-        let shifted = Frame { mt: false, view: Affine::translate((-x0, -y0)) * f.view, ..*f };
+        let shifted = Frame { mt: false, view: Affine::scale(k) * Affine::translate((-x0, -y0)) * f.view, px: f.px / k, ..*f };
         self.inside_layer(|r| draw(r, &mut off, &shifted, None));
         off.flush();
         let mut pm = vello_cpu::Pixmap::new(w, h);
@@ -1255,7 +1412,12 @@ impl Renderer {
             ctx.set_transform(Affine::IDENTITY);
             ctx.push_layer(None, Some(blend_mode(m)), Some(o), None, None);
         }
-        crate::group::draw_pixmap(ctx, std::sync::Arc::new(pm), (x0, y0));
+        if k < 1.0 {
+            draw_scaled(ctx, std::sync::Arc::new(pm), (x0, y0), k);
+            ctx.set_transform(Affine::IDENTITY);
+        } else {
+            crate::group::draw_pixmap(ctx, std::sync::Arc::new(pm), (x0, y0));
+        }
         if layered {
             ctx.pop_layer();
         }
@@ -1351,8 +1513,27 @@ mod tests {
     use vectorcraft_doc::{Appearance, Document, Effect, Node};
     use vectorcraft_geom::{Affine, Rect, shapes};
 
-    use super::Drawn;
+    use super::{Drawn, PIXEL_BUDGET, filter_region};
     use crate::{RenderOptions, Rendered, Renderer};
+
+    /// #1706: the raster a shadow or glow is filtered in stays within the pixel budget however
+    /// far the blur spreads at the zoom (it was up to 65535 pixels a side: 16 GB).
+    #[test]
+    fn a_wide_blur_at_a_high_zoom_is_filtered_within_the_pixel_budget() {
+        // A 100 pt square at 3200 % and at 6400 %, blurred by 1000 pt, in a 1600 × 1000 view.
+        for zoom in [32.0, 64.0] {
+            let reach = Rect::new(0.0, 0.0, 100.0 * zoom, 100.0 * zoom);
+            let (x0, y0, w, h, k) = filter_region(reach, (1600, 1000), 1000.0 * zoom).unwrap();
+            assert!(f64::from(w) * f64::from(h) <= PIXEL_BUDGET, "{w} × {h}");
+            assert!(k < 1.0 && x0 < 0.0 && y0 < 0.0);
+            // It still covers the view and the blur's spread around it, at that scale.
+            assert!(f64::from(w) / k >= 1600.0 + 1500.0 * zoom && f64::from(h) / k >= 1000.0 + 1500.0 * zoom);
+        }
+        // A small blur is filtered at full size, cropped to what can show.
+        assert_eq!(filter_region(Rect::new(10.0, 20.0, 110.0, 70.0), (1600, 1000), 4.0), Some((2.0, 12.0, 116, 66, 1.0)));
+        assert_eq!(filter_region(Rect::new(5000.0, 0.0, 5100.0, 100.0), (1600, 1000), 4.0), None, "off the view");
+        assert_eq!(filter_region(Rect::new(0.0, 0.0, 100.0, 100.0), (1600, 1000), f64::NAN).map(|r| r.4), Some(1.0));
+    }
 
     fn doc_with(r: Rect, fill: Color, effects: Vec<(&str, serde_json::Value)>) -> Document {
         let mut d = Document::new(100.0, 100.0);
@@ -1592,7 +1773,7 @@ mod tests {
     fn visual_bounds_include_shadow() {
         let d = doc_with(Rect::new(0.0, 0.0, 10.0, 10.0), Color::BLACK, vec![("stylize.dropShadow", json!({"x": 7, "y": 7, "blur": 5}))]);
         let n = &d.layers[0].children().unwrap()[0];
-        let b = super::visual_bounds(n).unwrap();
+        let b = super::visual_bounds(&d.symbol_boxes(), n).unwrap();
         assert!(b.x1 >= 10.0 + 7.0 + 7.5 - 1e-9);
     }
 
@@ -1698,6 +1879,47 @@ mod tests {
         assert_eq!(r.stats.moved, 0);
         assert!(after == fresh(&d), "the frame after the drag");
         assert!(after != last, "6.3 is not on a whole pixel");
+    }
+
+    /// While interacting, a group holding a symbol instance whose art lies outside the 20 × 20
+    /// square around the origin draws its drop shadow from the raster of an earlier frame. The
+    /// shadow is made from the instance's art, which the renderer measures the group's content by.
+    #[test]
+    fn a_moved_group_draws_the_shadow_of_the_instance_art_in_it_while_interacting() {
+        let mut base = Document::new(100.0, 100.0);
+        let orange = Appearance::basic(Paint::solid(Color::rgb(0.9, 0.4, 0.1)), Paint::None, 0.0);
+        let art = Node::path(base.alloc_id(), shapes::rectangle(Rect::new(100.0, 100.0, 130.0, 126.0)), orange);
+        base.symbols.push(vectorcraft_doc::Symbol { name: "Far".into(), art: std::sync::Arc::new(art) });
+        // The instance draws the art from (20, 20) to (50, 46), and the 20 × 20 square around the
+        // origin from (-90, -90) to (-70, -70).
+        let xf = Affine::translate((-80.0, -80.0));
+        let instance = Node::new(base.alloc_id(), vectorcraft_doc::NodeKind::SymbolInstance { symbol: "Far".into(), xf });
+        let mut group = Node::group(base.alloc_id(), vec![std::sync::Arc::new(instance)]);
+        let shadow = json!({"x": 4, "y": 3, "blur": 2, "opacity": 80});
+        group.appearance.effects.push(Effect { id: "stylize.dropShadow".into(), params: shadow, visible: true });
+        let (id, l) = (group.id, base.layers[0].id);
+        base.insert(Some(l), 0, group).unwrap();
+        // The group moved from where it started, as each frame of a drag moves it.
+        let moved = |dx: f64, dy: f64| {
+            let mut d = base.clone();
+            d.node_mut(id).unwrap().transform(Affine::translate((dx, dy)), false);
+            d
+        };
+        let (view, still) = (Affine::scale(2.0), RenderOptions { background: Some([255, 255, 255, 255]), ..Default::default() });
+        let live = RenderOptions { interacting: true, ..still.clone() };
+        let fresh = |d: &Document| Renderer::new().render(d, 200, 200, view, &still);
+        let mut r = Renderer::new();
+        let first = r.render(&base, 200, 200, view, &still);
+        assert!(first.pixels == fresh(&base).pixels);
+        // The shadow, 4 pt right of the art's right edge at x 50, at (104, 70) in pixels.
+        assert!(lum(first.pixel(104, 70)) < WHITE, "{:?}", first.pixel(104, 70));
+        // Moves on whole pixels (2 a point): the moved shadow lies where a fresh renderer draws it.
+        for (dx, dy) in [(3.0, 0.0), (5.5, 2.0)] {
+            let d = moved(dx, dy);
+            let frame = r.render(&d, 200, 200, view, &live).pixels;
+            assert_eq!(r.stats.moved, 1, "the shadow moved by ({dx}, {dy})");
+            assert!(frame == fresh(&d).pixels, "moved by ({dx}, {dy})");
+        }
     }
 
     /// While interacting, a raster moves with its object only when the content's pixels (for a

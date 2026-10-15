@@ -19,6 +19,23 @@ pub(super) fn read(body: &str) -> crate::Imported {
     import(&eps(body)).unwrap()
 }
 
+/// #1714: arrays and dictionaries a program links into themselves or each other are freed with
+/// the interpreter, also the ones it no longer reaches and when it stops on an error.
+#[test]
+fn arrays_and_dictionaries_holding_themselves_are_freed() {
+    // The arrays still alive once a program's interpreter has released what it made: the ones
+    // the interpreter itself holds, the same for every program here.
+    let left = |program: &str| {
+        let _ = import(&eps(program));
+        crate::import::obj::ARRAYS_LEFT.with(std::cell::Cell::get)
+    };
+    let plain = left("/a 1 array def /b 1 array def a 0 b put");
+    let cycles = "/a 1 array def a 0 a put         /b 1 array def /c 1 array def b 0 c put c 0 b put         /d 1 dict def /e 1 array def d /e e put e 0 d put         1 array dup 0 1 index put pop         /a null def /b null def";
+    for program in [cycles.to_string(), format!("{cycles} 1 0 div"), format!("{cycles} /p {{ p }} def")] {
+        assert_eq!(left(&program), plain, "{program}");
+    }
+}
+
 /// The objects of the document's layer.
 pub(super) fn objects(d: &Document) -> Vec<Arc<Node>> {
     d.layers[0].children().unwrap().clone()
@@ -292,6 +309,19 @@ fn shadings_become_gradients() {
     assert_eq!(g.gradient.kind, GradientKind::Radial);
     let offsets: Vec<f32> = g.gradient.stops.iter().map(|s| s.offset).collect();
     assert_eq!(offsets, vec![0.0, 0.25, 1.0]);
+    // Pieces that don't meet at a bound make a hard stop: the colour before the bound and the
+    // one after it, at the same offset (the PDF reader does the same).
+    let hard = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 200 0] /Function << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1] /Functions [<< /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>] >> >>";
+    let r = read(&format!("0 0 200 50 rectclip {hard} shfill"));
+    let o = objects(&r.document);
+    let Some(Paint::Gradient(g)) = fill(&o[0]) else { panic!("{:?}", o[0]) };
+    let stops: Vec<(f32, Color)> = g.gradient.stops.iter().map(|s| (s.offset, s.color)).collect();
+    let (red, blue) = (Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0));
+    assert_eq!(stops.len(), 4, "{stops:?}");
+    assert_eq!((stops[0], stops[3]), ((0.0, red), (1.0, blue)), "{stops:?}");
+    assert_eq!((stops[1].0, stops[2]), (0.5, (0.5, red)), "{stops:?}");
+    let near = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+    assert!(near(stops[1].1.to_rgb(), blue.to_rgb()), "{stops:?}");
 }
 
 /// Tiling patterns and spot inks are found again through a hash of what tells them apart, so a

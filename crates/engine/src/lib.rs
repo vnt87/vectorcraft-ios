@@ -12,6 +12,7 @@ pub mod guard;
 pub mod inspect;
 pub mod journal;
 pub mod link_watch;
+pub mod namematch;
 pub mod steps;
 mod tooling;
 pub mod units;
@@ -583,6 +584,10 @@ pub(crate) fn is_guide_path(d: &Document, id: NodeId) -> bool {
     d.node(id).is_some_and(|n| matches!(n.kind, NodeKind::Path { guide: true, .. }))
 }
 
+/// The error of an edit that would nest objects deeper than [`vectorcraft_doc::MAX_DEPTH`].
+pub const TOO_DEEP: &str = "objects can't be nested more than 32 deep";
+const _: () = assert!(vectorcraft_doc::MAX_DEPTH == 32, "TOO_DEEP (and its catalog rows) names the cap");
+
 /// Cheap sanity check after an edit: artboards and the objects just touched (the selection) must
 /// have finite, in-range geometry, so saved files always reload and renderers never see NaN/∞.
 fn doc_sane(d: &Document, sel: &Selection) -> bool {
@@ -712,7 +717,7 @@ pub struct Prefs {
     pub canvas_color: String,
     pub auto_collapse_icon_panels: bool,
     /// User Interface › Show Tool Group Labels: the toolbar's group names (Select, Shapes, Draw…);
-    /// off, a faint dash separates the groups instead (#663).
+    /// off (as it ships, #1736), the tools run on from group to group with nothing between them.
     pub tool_group_labels: bool,
     pub open_documents_as_tabs: bool,
     pub large_tabs: bool,
@@ -830,6 +835,8 @@ pub struct Prefs {
     /// the Properties panel and the Control bar (their size fields pass `proportional` to
     /// `object.setBounds`).
     pub constrain_proportions: bool,
+    /// One Corner Radius field sets every corner of a live rectangle (off: a field per corner).
+    pub single_corner_radius: bool,
     /// The tools' persistent options by store (a tool id, or a store a family shares: `liquify`
     /// holds the Liquify tools' Global Brush Dimensions), see [`vectorcraft_tools::settings`]:
     /// kept across tool switches and saved with the preferences. Not a Preferences dialog field:
@@ -850,6 +857,11 @@ pub struct Prefs {
     /// Perspective Grid Options (double-click the Perspective Grid tool): whether the Plane
     /// Switching Widget shows and where (`perspective.widget.options`).
     pub perspective_widget: vectorcraft_tools::distort::perspective::widget::WidgetOptions,
+    /// What names and codes in other apps' shortcut sets stand for, as the user confirmed them on
+    /// import (`importMatches.*`). A local library, not a Preferences dialog field: resetting the
+    /// preferences keeps it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub import_matches: Vec<cmd::importmatches::ImportMatch>,
 }
 
 impl Default for Prefs {
@@ -936,7 +948,7 @@ impl Default for Prefs {
             ui_brightness: s("mediumDark"),
             canvas_color: s("matchUi"),
             auto_collapse_icon_panels: false,
-            tool_group_labels: true,
+            tool_group_labels: false,
             open_documents_as_tabs: true,
             large_tabs: false,
             ui_scaling: 1.0,
@@ -990,10 +1002,12 @@ impl Default for Prefs {
             web_export_settings: None,
             print_presets: vec![],
             constrain_proportions: false,
+            single_corner_radius: true,
             tool_settings: Default::default(),
             perspective_presets: vec![],
             blend_options: None,
             perspective_widget: Default::default(),
+            import_matches: vec![],
         }
     }
 }
@@ -1222,26 +1236,24 @@ impl Session {
         format!("Untitled-{}", self.untitled_counter)
     }
     /// Text layout bounds are a cache (not saved): compute them for a document just read, or
-    /// selection boxes and hit testing would use the rough estimate until each text is edited.
-    fn refresh_text_bounds(doc: &mut Document) {
+    /// selection boxes and hit testing would use the rough estimate until each text is edited, and
+    /// what is fitted to type's bounds (an envelope warping it) would come out differently. That
+    /// holds for the type in symbol definitions, pattern tiles, graph designs and opacity masks too,
+    /// not only in the layers (#1738).
+    pub(crate) fn refresh_text_bounds(doc: &mut Document) {
         // Inline graphics in text take their size from their symbols' art (not saved either).
         doc.resolve_inline_art();
-        let mut texts = vec![];
-        doc.walk(|n| {
-            if matches!(n.kind, NodeKind::Text(_)) {
-                texts.push(n.id);
-            }
-        });
-        for id in texts {
-            if let Some(NodeKind::Text(t)) = doc.node_mut(id).map(|n| &mut n.kind)
-                && t.cached_bounds.is_none()
-            {
-                cmd::typecmd::refresh_bounds(t);
-            }
+        let trees = doc.layers.iter_mut().chain(doc.symbols.iter_mut().map(|s| &mut s.art));
+        let trees = trees.chain(doc.graph_designs.iter_mut().map(|g| &mut g.art));
+        for tree in trees.chain(doc.patterns.iter_mut().flat_map(|p| p.art.iter_mut())) {
+            refresh_tree_text_bounds(tree);
         }
     }
     /// Add a document and make it active.
     pub fn add_document(&mut self, mut doc: Document, path: Option<String>) -> usize {
+        // Every edit is checked against the document before it, so the first one is within the cap
+        // (importers and the native reader have seen to theirs already, with a warning).
+        doc.limit_depth();
         Self::refresh_text_bounds(&mut doc);
         // Guides from files saved before guides had layers go on a layer.
         doc.adopt_guides();
@@ -1259,6 +1271,7 @@ impl Session {
         if index >= self.docs.len() {
             return false;
         }
+        doc.limit_depth();
         Self::refresh_text_bounds(&mut doc);
         doc.adopt_guides();
         if self.active == Some(index) {
@@ -1473,7 +1486,10 @@ impl Session {
                     if !st.doc.variables.bindings.is_empty() {
                         Arc::make_mut(&mut st.doc).prune_variable_bindings();
                     }
-                    if doc_sane(&st.doc, &st.selection) {
+                    if st.doc.too_deep(Some(&before)) {
+                        // Deeper trees overflow the stack of what walks them.
+                        Err(EngineError::Other(TOO_DEEP.into()))
+                    } else if doc_sane(&st.doc, &st.selection) {
                         Ok(v)
                     } else {
                         Err(EngineError::Other("result would exceed the canvas (coordinates out of range)".into()))
@@ -1573,13 +1589,17 @@ impl Session {
                 st.selection.clone_from(&it.selection);
             }
         }
+        // The previous preview's paint is undone with it.
+        self.pending_paint = None;
         let rw = cmd::distortcmds::perspective_rewrite(self, cmd, params);
         let (cmd, params) = rw.as_ref().map_or((cmd, params), |(c, p)| (c.as_str(), p));
         let r = self.execute(cmd, params);
         let params = self.noted(params);
         let st = self.doc_mut()?;
         if let Some(it) = &mut st.interaction {
-            it.preview = Some((cmd.to_string(), params));
+            // A failed preview leaves the document at the snapshot, so nothing is left to commit
+            // (not even an earlier successful preview, which the reset above already undid).
+            it.preview = r.is_ok().then(|| (cmd.to_string(), params));
         }
         r
     }
@@ -1683,6 +1703,31 @@ impl Session {
     /// Commands with enablement (for menus, palette, MCP `list_commands`).
     pub fn commands(&self) -> Vec<CommandInfo> {
         command_specs().iter().map(|c| c.info(self)).collect()
+    }
+}
+
+/// Lay out the type in tree `n` (opacity mask art included) whose bounds aren't cached. Only the
+/// nodes on the way to such type are copied.
+fn refresh_tree_text_bounds(n: &mut Arc<vectorcraft_doc::Node>) {
+    fn stale(n: &vectorcraft_doc::Node) -> bool {
+        matches!(&n.kind, NodeKind::Text(t) if t.cached_bounds.is_none())
+            || n.extras().mask.as_deref().is_some_and(|m| stale(&m.art))
+            || n.children().is_some_and(|ch| ch.iter().any(|c| stale(c)))
+    }
+    if !stale(n) {
+        return;
+    }
+    let n = Arc::make_mut(n);
+    if let NodeKind::Text(t) = &mut n.kind
+        && t.cached_bounds.is_none()
+    {
+        cmd::typecmd::refresh_bounds(t);
+    }
+    if let Some(m) = n.extras_if_any().and_then(|e| e.mask.as_deref_mut()) {
+        refresh_tree_text_bounds(&mut m.art);
+    }
+    for c in n.children_mut().into_iter().flatten() {
+        refresh_tree_text_bounds(c);
     }
 }
 
@@ -1921,6 +1966,8 @@ mod tests_scripts;
 #[cfg(test)]
 mod tests_shaper;
 #[cfg(test)]
+mod tests_shortcutset;
+#[cfg(test)]
 mod tests_slices;
 #[cfg(test)]
 mod tests_smartguides;
@@ -1944,6 +1991,8 @@ mod tests_swatchcmds;
 mod tests_swatches;
 #[cfg(test)]
 mod tests_swatchlib;
+#[cfg(test)]
+mod tests_symbolbounds;
 #[cfg(test)]
 mod tests_targeting;
 #[cfg(test)]
