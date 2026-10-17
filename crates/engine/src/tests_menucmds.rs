@@ -357,6 +357,36 @@ fn transform_each_random_is_deterministic_with_seed() {
     assert!(x.x0.abs() <= 50.0 && x.width() == 100.0);
 }
 
+/// #1910: Transform Each's Reflect X flips left-right; Reflect Y flips top-bottom (same as
+/// Effect › Distort › Transform and Illustrator's Transform Each checkboxes).
+#[test]
+fn transform_each_reflect_x_flips_left_right_reflect_y_flips_top_bottom() {
+    let mut s = session();
+    // A right-pointing triangle: tip at x=100, base on the left.
+    let id =
+        id_of(&s.execute("path.create", &json!({"anchors": [{"x": 0, "y": 0}, {"x": 100, "y": 50}, {"x": 0, "y": 100}], "closed": true})).unwrap());
+    sel(&mut s, &[id]);
+    s.execute("object.transformEach", &json!({"reflectX": true})).unwrap();
+    let tip_x = match &node(&s, id).kind {
+        // The tip is the only vertex at y=50; Reflect X about the centre maps (100, 50) → (0, 50).
+        NodeKind::Path { path, .. } => path.subpaths[0].anchors.iter().find(|a| (a.p.y - 50.0).abs() < 1e-6).map(|a| a.p.x).unwrap_or(f64::NAN),
+        _ => panic!("expected a path"),
+    };
+    assert!((tip_x - 0.0).abs() < 1e-6, "reflectX must move the tip from x=100 to x=0, got {tip_x}");
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    // A down-pointing tip at (50, 100); Reflect Y about the centre (50, 50) maps it to (50, 0).
+    let id2 =
+        id_of(&s.execute("path.create", &json!({"anchors": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 50, "y": 100}], "closed": true})).unwrap());
+    sel(&mut s, &[id2]);
+    s.execute("object.transformEach", &json!({"reflectY": true})).unwrap();
+    let tip_y = match &node(&s, id2).kind {
+        NodeKind::Path { path, .. } => path.subpaths[0].anchors.iter().find(|a| (a.p.x - 50.0).abs() < 1e-6).map(|a| a.p.y).unwrap_or(f64::NAN),
+        _ => panic!("expected a path"),
+    };
+    assert!((tip_y - 0.0).abs() < 1e-6, "reflectY must move the tip from y=100 to y=0, got {tip_y}");
+}
+
 /// Transform Each with its default values, or with any values that move nothing (both scales 100%,
 /// no move, rotation or reflection, Random or not), records no undo step and replies with the
 /// objects. With only a layer selected there is no object to transform: with Copy or without, it
@@ -386,6 +416,57 @@ fn transform_each_that_changes_nothing_records_no_undo_step() {
     let r = s.execute("object.transformEach", &json!({"copy": true})).unwrap();
     assert_eq!(r["ids"].as_array().unwrap().len(), 2);
     assert_eq!(history(&s), (before.0 + 1, 0, true));
+}
+
+/// #1732: Transform Again (⌘D) repeats a Transform Each — the same transform on the objects
+/// again, another copy when the Transform Each made copies — rather than an earlier transform.
+#[test]
+fn transform_again_repeats_transform_each() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 100.0, 100.0);
+    sel(&mut s, &[a]);
+    // An earlier Transform must not be what Transform Again repeats.
+    s.execute("object.transform", &json!({"matrix": [1, 0, 0, 1, 5, 5]})).unwrap();
+    s.execute("object.transformEach", &json!({"moveH": 50})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(55.0, 5.0, 155.0, 105.0));
+    s.execute("object.transformAgain", &json!({})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(105.0, 5.0, 205.0, 105.0), "50 pt more, not 5");
+    s.execute("object.transformAgain", &json!({})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(155.0, 5.0, 255.0, 105.0), "again and again");
+    // With Copy, every Transform Again makes another copy, further on each time.
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 100.0, 100.0);
+    sel(&mut s, &[a]);
+    let r = s.execute("object.transformEach", &json!({"moveH": 50, "copy": true})).unwrap();
+    let first = NodeId(r["ids"][0].as_u64().unwrap());
+    assert_eq!(bounds(&s, first), Rect::new(50.0, 0.0, 150.0, 100.0));
+    let r = s.execute("object.transformAgain", &json!({})).unwrap();
+    let second = NodeId(r["ids"][0].as_u64().unwrap());
+    assert_ne!(second, first);
+    assert_eq!(bounds(&s, second), Rect::new(100.0, 0.0, 200.0, 100.0), "another copy, 50 pt further");
+    assert_eq!(bounds(&s, a), Rect::new(0.0, 0.0, 100.0, 100.0), "the original stays");
+    assert_eq!(bounds(&s, first), Rect::new(50.0, 0.0, 150.0, 100.0), "and the first copy too");
+}
+
+/// #1732: the Transform Each dialog previews through an interaction; OK commits it, and
+/// Transform Again repeats what the commit recorded. A preview that changed nothing doesn't take
+/// the record over (it records no undo step either).
+#[test]
+fn transform_again_repeats_a_committed_transform_each_preview() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 100.0, 100.0);
+    sel(&mut s, &[a]);
+    s.begin_interaction("Transform Each").unwrap();
+    s.preview("object.transformEach", &json!({"moveH": 50})).unwrap();
+    s.commit_interaction().unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(50.0, 0.0, 150.0, 100.0));
+    s.execute("object.transformAgain", &json!({})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(100.0, 0.0, 200.0, 100.0), "the dialog's Transform Each repeats");
+    s.begin_interaction("Transform Each").unwrap();
+    s.preview("object.transformEach", &json!({})).unwrap();
+    s.commit_interaction().unwrap();
+    s.execute("object.transformAgain", &json!({})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(150.0, 0.0, 250.0, 100.0), "still the one that changed something");
 }
 
 #[test]
@@ -622,6 +703,62 @@ fn convert_to_artboards_and_rearrange() {
     let d = &s.doc().unwrap().doc;
     assert_eq!(d.artboards[1].rect, Rect::new(0.0, 650.0, 200.0, 750.0));
     assert_eq!(bounds(&s, b), Rect::new(50.0, 675.0, 60.0, 685.0));
+}
+
+/// Fit to Artwork Bounds fits each artboard it is given to the art on it, in one undo step: an
+/// object partly on an artboard counts for each artboard it overlaps, art flush with an edge from
+/// outside or on no artboard doesn't count, and an artboard with no art stays as it is.
+#[test]
+fn fit_to_artwork_bounds_fits_each_artboard_to_its_own_art() {
+    let mut s = session();
+    s.execute("artboard.new", &json!({"x": 1000, "y": 0, "width": 400, "height": 300})).unwrap();
+    s.execute("artboard.new", &json!({"x": 0, "y": 1000, "width": 300, "height": 300})).unwrap();
+    rect(&mut s, 100.0, 100.0, 50.0, 50.0);
+    rect(&mut s, 1100.0, 50.0, 100.0, 100.0);
+    // Across the gap between artboards 1 and 2.
+    rect(&mut s, 700.0, 250.0, 350.0, 30.0);
+    // Flush with artboard 1's right edge, and on no artboard.
+    rect(&mut s, 800.0, 500.0, 100.0, 50.0);
+    rect(&mut s, 3000.0, 3000.0, 10.0, 10.0);
+    s.execute("select.all", &json!({})).unwrap();
+    s.execute("paint.setStroke", &json!({"none": true})).unwrap();
+    let boards = |s: &Session| s.doc().unwrap().doc.artboards.iter().map(|a| a.rect).collect::<Vec<_>>();
+    let was = boards(&s);
+    let n = undo_len(&s);
+    s.execute("artboard.fitToArt", &json!({"indices": [0, 1, 2]})).unwrap();
+    assert_eq!(boards(&s), [Rect::new(100.0, 100.0, 1050.0, 280.0), Rect::new(700.0, 50.0, 1200.0, 280.0), was[2]]);
+    assert_eq!(undo_len(&s), n + 1);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(boards(&s), was);
+    assert!(s.execute("artboard.fitToArt", &json!({"index": 2})).is_err(), "no art on artboard 3");
+    assert_eq!(boards(&s), was);
+    s.execute("artboard.fitToArt", &json!({})).unwrap();
+    assert_eq!(boards(&s), [Rect::new(100.0, 100.0, 1050.0, 280.0), was[1], was[2]], "the first artboard by default");
+}
+
+/// Artboard Options and Fit to Selected Art fail with `no such artboard` on an `index` that names
+/// no artboard (past the last, negative, fractional, a string or null), and the artboards stay as
+/// they were. Artboard Options needs an `index`; Fit to Selected Art without one fits the first
+/// artboard.
+#[test]
+fn artboard_options_and_fit_to_selected_art_refuse_an_index_that_names_no_artboard() {
+    let mut s = session();
+    s.execute("artboard.new", &json!({"x": 1000, "y": 0, "width": 400, "height": 300})).unwrap();
+    rect(&mut s, 100.0, 100.0, 50.0, 50.0);
+    s.execute("select.all", &json!({})).unwrap();
+    s.execute("paint.setStroke", &json!({"none": true})).unwrap();
+    let boards = |s: &Session| s.doc().unwrap().doc.artboards.iter().map(|a| a.rect).collect::<Vec<_>>();
+    let (was, n) = (boards(&s), undo_len(&s));
+    for index in [json!(99), json!(-1), json!(1.5), json!("1"), Value::Null] {
+        for (cmd, p) in [("artboard.setProps", json!({"index": index, "width": 300})), ("artboard.fitToSelection", json!({"index": index}))] {
+            assert_eq!(s.execute(cmd, &p).unwrap_err().to_string(), "no such artboard", "{cmd} {p}");
+        }
+    }
+    let e = s.execute("artboard.setProps", &json!({"width": 300})).unwrap_err().to_string();
+    assert_eq!(e, "invalid parameters for `artboard.setProps`: missing index");
+    assert_eq!((boards(&s), undo_len(&s)), (was.clone(), n), "the artboards and the undo steps as they were");
+    s.execute("artboard.fitToSelection", &json!({})).unwrap();
+    assert_eq!(boards(&s), [Rect::new(100.0, 100.0, 150.0, 150.0), was[1]], "the first artboard by default");
 }
 
 // ---------- Edit Colors ----------
@@ -933,6 +1070,35 @@ fn select_menu_commands_stay_inside_the_isolated_group() {
     assert_eq!(selected(&s), vec![a, b, text_inside]);
 }
 
+/// In isolation mode the Layers panel's target circle and selection column can't select an object
+/// outside the isolated group, so it can't be moved either (#2286).
+#[test]
+fn layers_panel_selects_nothing_outside_the_isolated_group() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 50.0, 50.0);
+    let b = rect(&mut s, 100.0, 0.0, 50.0, 50.0);
+    let outside = rect(&mut s, 300.0, 0.0, 50.0, 50.0);
+    sel(&mut s, &[a, b]);
+    let g = id_of(&s.execute("object.group", &json!({})).unwrap());
+    s.execute("object.isolate", &json!({"id": g.0})).unwrap();
+    let before = bounds(&s, outside);
+    let _ = s.execute("layer.target", &json!({"id": outside.0}));
+    assert!(!selected(&s).contains(&outside));
+    let _ = s.execute("layer.target", &json!({"id": outside.0, "add": true}));
+    assert!(!selected(&s).contains(&outside));
+    let _ = s.execute("layer.selectAll", &json!({"id": outside.0}));
+    assert!(!selected(&s).contains(&outside));
+    let _ = s.execute("layer.selectAll", &json!({"id": outside.0, "add": true}));
+    assert!(!selected(&s).contains(&outside));
+    let _ = s.execute("object.move", &json!({"dx": 10, "dy": 0}));
+    assert_eq!(bounds(&s, outside), before);
+    // Objects inside the group can still be targeted and selected.
+    s.execute("layer.target", &json!({"id": a.0})).unwrap();
+    assert_eq!(selected(&s), vec![a]);
+    s.execute("layer.selectAll", &json!({"id": b.0})).unwrap();
+    assert_eq!(selected(&s), vec![b]);
+}
+
 /// In isolation mode a recalled selection leaves out the objects outside the isolated group, and
 /// Next Object Above selects nothing outside it.
 #[test]
@@ -1061,6 +1227,141 @@ fn save_and_recall_selection() {
     assert_eq!(s.execute("select.savedList", &json!({})).unwrap(), json!(["Pair"]));
     s.execute("select.editSaved", &json!({"name": "Pair", "delete": true})).unwrap();
     assert!(s.execute("select.recall", &json!({"name": "Pair"})).is_err());
+}
+
+#[test]
+fn update_selection_replaces_the_recalled_saved_selection() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 10.0, 10.0);
+    let b = rect(&mut s, 20.0, 0.0, 10.0, 10.0);
+    let c = rect(&mut s, 40.0, 0.0, 10.0, 10.0);
+    sel(&mut s, &[a, b]);
+    s.execute("select.save", &json!({"name": "A"})).unwrap();
+    s.execute("select.save", &json!({"name": "Other"})).unwrap();
+    // Nothing recalled yet: Update Selection is off.
+    assert!(s.execute("select.update", &json!({})).is_err());
+    s.execute("select.none", &json!({})).unwrap();
+    s.execute("select.recall", &json!({"name": "A"})).unwrap();
+    s.execute("select.add", &json!({"ids": [c.0]})).unwrap();
+    s.doc_mut().unwrap().mark_saved();
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
+    assert!(s.doc().unwrap().is_dirty());
+    s.execute("select.none", &json!({})).unwrap();
+    assert_eq!(s.execute("select.recall", &json!({"name": "A"})).unwrap()["count"], 3);
+    assert_eq!(selected(&s), vec![a, b, c]);
+    // Only the recalled one changes.
+    s.execute("select.recall", &json!({"name": "Other"})).unwrap();
+    assert_eq!(selected(&s), vec![a, b]);
+    // It travels with the file.
+    let loaded = vectorcraft_format::load(&vectorcraft_format::save_file(&s.doc().unwrap().doc)).unwrap();
+    assert_eq!(loaded.saved_selections.iter().map(|x| x.objects.len()).collect::<Vec<_>>(), [3, 2]);
+    // It is one undo step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("select.recall", &json!({"name": "A"})).unwrap();
+    assert_eq!(selected(&s), vec![a, b]);
+    // Nothing selected: Update Selection is off.
+    s.execute("select.none", &json!({})).unwrap();
+    assert!(s.execute("select.update", &json!({})).is_err());
+    // It can run again without another recall.
+    sel(&mut s, &[c]);
+    s.execute("select.update", &json!({})).unwrap();
+    sel(&mut s, &[b]);
+    s.execute("select.update", &json!({})).unwrap();
+    s.execute("select.recall", &json!({"name": "A"})).unwrap();
+    assert_eq!(selected(&s), vec![b]);
+}
+
+#[test]
+fn update_selection_follows_a_rename_and_stops_after_a_delete() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 10.0, 10.0);
+    let b = rect(&mut s, 20.0, 0.0, 10.0, 10.0);
+    sel(&mut s, &[a]);
+    s.execute("select.save", &json!({"name": "One"})).unwrap();
+    s.execute("select.recall", &json!({"name": "One"})).unwrap();
+    s.execute("select.editSaved", &json!({"name": "One", "newName": "Uno"})).unwrap();
+    sel(&mut s, &[a, b]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "Uno");
+    s.execute("select.recall", &json!({"name": "Uno"})).unwrap();
+    assert_eq!(selected(&s), vec![a, b]);
+    // A saved selection of the same name saved after the delete is not the recalled one.
+    s.execute("select.editSaved", &json!({"name": "Uno", "delete": true})).unwrap();
+    s.execute("select.save", &json!({"name": "Uno"})).unwrap();
+    assert!(s.execute("select.update", &json!({})).is_err());
+}
+
+#[test]
+fn update_selection_changes_the_recalled_saved_selection_after_undo_and_redo() {
+    let mut s = session();
+    let a = rect(&mut s, 0.0, 0.0, 10.0, 10.0);
+    let b = rect(&mut s, 20.0, 0.0, 10.0, 10.0);
+    let c = rect(&mut s, 40.0, 0.0, 10.0, 10.0);
+    let recall = |s: &mut Session, name: &str| {
+        s.execute("select.recall", &json!({"name": name})).unwrap();
+        selected(s)
+    };
+    sel(&mut s, &[a]);
+    s.execute("select.save", &json!({"name": "A"})).unwrap();
+    sel(&mut s, &[b]);
+    s.execute("select.save", &json!({"name": "B"})).unwrap();
+    recall(&mut s, "A");
+    // Swap the two names, then undo the swap: Update Selection still changes the one recalled.
+    let swap = json!({"edits": [{"name": "A", "newName": "B"}, {"name": "B", "newName": "A"}]});
+    s.execute("select.editSaved", &swap).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    sel(&mut s, &[a, c]);
+    s.execute("select.update", &json!({})).unwrap();
+    assert_eq!((recall(&mut s, "A"), recall(&mut s, "B")), (vec![a, c], vec![b]));
+    // Undo and redo a rename of the recalled one.
+    recall(&mut s, "A");
+    s.execute("select.editSaved", &json!({"name": "A", "newName": "First"})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.redo", &json!({})).unwrap();
+    sel(&mut s, &[c]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "First");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    sel(&mut s, &[c]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
+    assert_eq!(recall(&mut s, "A"), vec![c]);
+    // Undo and redo an Edit Selection… that renamed it and deleted the other one.
+    recall(&mut s, "A");
+    let edits = json!({"edits": [{"name": "A", "newName": "First"}, {"name": "B", "delete": true}]});
+    s.execute("select.editSaved", &edits).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.redo", &json!({})).unwrap();
+    sel(&mut s, &[a]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "First");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    sel(&mut s, &[a]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
+    assert_eq!((recall(&mut s, "A"), recall(&mut s, "B")), (vec![a], vec![b]));
+    // A cancelled undo group that renamed it.
+    recall(&mut s, "B");
+    s.execute("edit.undoGroup.begin", &json!({})).unwrap();
+    s.execute("select.editSaved", &json!({"name": "B", "newName": "Second"})).unwrap();
+    s.execute("edit.undoGroup.end", &json!({"cancel": true})).unwrap();
+    sel(&mut s, &[a, b]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "B");
+    assert_eq!(recall(&mut s, "B"), vec![a, b]);
+    // Undo an Update Selection that gave it the other one's objects.
+    recall(&mut s, "A");
+    sel(&mut s, &[a, b]);
+    s.execute("select.update", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    sel(&mut s, &[c]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
+    assert_eq!((recall(&mut s, "A"), recall(&mut s, "B")), (vec![c], vec![a, b]));
+    // Save Selection made after the recall, and undone.
+    recall(&mut s, "A");
+    s.execute("select.save", &json!({"name": "C"})).unwrap();
+    sel(&mut s, &[b]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    sel(&mut s, &[a]);
+    assert_eq!(s.execute("select.update", &json!({})).unwrap()["name"], "A");
 }
 
 #[test]
@@ -1366,6 +1667,61 @@ fn make_release_clear_guides() {
     assert_eq!(undo_len(&s), n + 1);
 }
 
+/// The anchor positions of `id`, which must be a path of one open subpath, and whether it is still a guide.
+fn line_ends(s: &Session, id: NodeId) -> (Vec<(f64, f64)>, bool) {
+    let NodeKind::Path { path, guide, .. } = &node(s, id).kind else { panic!("not a path") };
+    let [sub] = &path.subpaths[..] else { panic!("not one subpath") };
+    assert!(!sub.closed);
+    (sub.anchors.iter().map(|a| (a.p.x, a.p.y)).collect(), *guide)
+}
+
+/// Release Guides turns ruler guides into paths with no fill or stroke, each in one undo step. An
+/// artboard guide becomes a line across its artboard, and a canvas guide becomes a line across the
+/// bounds of all the artboards.
+#[test]
+fn release_guides_turns_ruler_guides_into_paths() {
+    let mut s = session();
+    s.execute("artboard.new", &json!({})).unwrap();
+    let g = rect(&mut s, 0.0, 0.0, 10.0, 10.0);
+    sel(&mut s, &[g]);
+    s.execute("view.guides.make", &json!({})).unwrap();
+    s.execute("guide.add", &json!({"vertical": false, "pos": 300})).unwrap();
+    s.execute("guide.add", &json!({"vertical": false, "pos": 50, "artboard": 0})).unwrap();
+    let d = &s.doc().unwrap().doc;
+    let (ab, all) = (d.artboards[0].rect, d.artboards[0].rect.union(d.artboards[1].rect));
+    assert!(all.x1 > ab.x1);
+    let layer = s.doc().unwrap().current_layer();
+    // The selected artboard guide goes, and a selected path across its artboard takes its place.
+    s.execute("guide.select", &json!({"indexes": [1]})).unwrap();
+    let n = undo_len(&s);
+    assert_eq!(s.execute("view.guides.release", &json!({})).unwrap()["count"], 1);
+    assert_eq!((guides(&s), undo_len(&s)), (vec![(false, 300.0)], n + 1));
+    let [line] = selected(&s)[..] else { panic!("one path selected") };
+    assert_eq!(line_ends(&s, line), (vec![(ab.x0, 50.0), (ab.x1, 50.0)], false));
+    assert_eq!(node(&s, line).appearance, Appearance::basic(Paint::None, Paint::None, 0.0));
+    assert_eq!(s.doc().unwrap().doc.parent_of(line), layer);
+    assert!(matches!(node(&s, g).kind, NodeKind::Path { guide: true, .. }), "the guide path stays a guide");
+    // Undo brings the guide back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(guides(&s), vec![(false, 300.0), (false, 50.0)]);
+    assert!(s.doc().unwrap().doc.node(line).is_none());
+    // index releases the canvas guide as a line across the artboards.
+    assert_eq!(s.execute("view.guides.release", &json!({"index": 0})).unwrap()["count"], 1);
+    assert_eq!(guides(&s), vec![(false, 50.0)]);
+    let [line] = selected(&s)[..] else { panic!("one path selected") };
+    assert_eq!(line_ends(&s, line), (vec![(all.x0, 300.0), (all.x1, 300.0)], false));
+    // ids releases those guide paths.
+    assert_eq!(s.execute("view.guides.release", &json!({"ids": [g.0]})).unwrap()["count"], 1);
+    assert!(matches!(node(&s, g).kind, NodeKind::Path { guide: false, .. }));
+    assert_eq!(selected(&s), vec![g]);
+    // Locked guides are not released by index or ids.
+    s.execute("view.guides.lock", &json!({"locked": true})).unwrap();
+    for p in [json!({"index": 0}), json!({"ids": [g.0]})] {
+        assert!(matches!(s.execute("view.guides.release", &p), Err(EngineError::Other(m)) if m == "guides are locked"), "{p}");
+    }
+    assert_eq!(guides(&s).len(), 1);
+}
+
 #[test]
 fn ruler_guides_and_lock() {
     let mut s = session();
@@ -1496,6 +1852,119 @@ fn guides_and_art_are_shift_selected_together() {
     s.execute("select.add", &json!({"ids": [b.0]})).unwrap();
     s.execute("edit.clear", &json!({"ids": [b.0]})).unwrap();
     assert_eq!(guides(&s).len(), 2);
+}
+
+/// When ruler guides and art are selected together, moving the art moves the guides as well;
+/// copy leaves both in place and moves the copies; single undo reverts both.
+#[test]
+fn guides_and_art_move_together_when_selected() {
+    let mut s = session();
+    let a = rect(&mut s, 10.0, 10.0, 40.0, 20.0);
+    s.execute("guide.add", &json!({"vertical": true, "pos": 200})).unwrap();
+    s.execute("guide.add", &json!({"vertical": false, "pos": 300})).unwrap();
+
+    // Select art and both guides.
+    sel(&mut s, &[a]);
+    s.execute("guide.select", &json!({"indexes": [0, 1], "toggle": true})).unwrap();
+    assert_eq!((selected(&s), selected_guides(&s)), (vec![a], vec![0, 1]));
+
+    // 1. Moving via object.transform moves both art and guides in one step.
+    let n = undo_len(&s);
+    s.execute("object.transform", &json!({"matrix": [1, 0, 0, 1, 25, 35]})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (35.0, 45.0));
+    assert_eq!(guides(&s), vec![(true, 225.0), (false, 335.0)]);
+    assert_eq!(undo_len(&s), n + 1);
+
+    // Undo restores both in one step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (10.0, 10.0));
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0)]);
+
+    // Redo reapplies both.
+    s.execute("edit.redo", &json!({})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (35.0, 45.0));
+    assert_eq!(guides(&s), vec![(true, 225.0), (false, 335.0)]);
+
+    // Undo back to start.
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    // 2. object.move also moves both.
+    s.execute("object.move", &json!({"dx": 15, "dy": 20})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (25.0, 30.0));
+    assert_eq!(guides(&s), vec![(true, 215.0), (false, 320.0)]);
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    // 3. Arrow-key nudge moves both.
+    s.execute("object.nudge", &json!({"dx": 1, "dy": 0})).unwrap();
+    let k = s.prefs.keyboard_increment;
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!(b.x0, 10.0 + k);
+    assert_eq!(guides(&s)[0], (true, 200.0 + k));
+    assert_eq!(guides(&s)[1], (false, 300.0));
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    // 4. Copy (e.g. Alt-drag) duplicates both art and guides, leaving originals in place.
+    let res = s.execute("object.transform", &json!({"matrix": [1, 0, 0, 1, 50, 60], "copy": true})).unwrap();
+    let copied_id = NodeId(res["ids"][0].as_u64().unwrap());
+    assert_ne!(copied_id, a);
+    let b_orig = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    let b_copy = s.doc().unwrap().doc.bounds_of(&[copied_id], false).unwrap();
+    assert_eq!((b_orig.x0, b_orig.y0), (10.0, 10.0));
+    assert_eq!((b_copy.x0, b_copy.y0), (60.0, 70.0));
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0), (true, 250.0), (false, 360.0)]);
+    assert_eq!((selected(&s), selected_guides(&s)), (vec![copied_id], vec![2, 3]));
+
+    // Undo takes back both copies in one step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0)]);
+    assert!(s.doc().unwrap().doc.node(copied_id).is_none());
+    assert!(s.doc().unwrap().doc.node(a).is_some());
+
+    // 5. Explicit ids: only the specified art moves, guides stay put.
+    sel(&mut s, &[a]);
+    s.execute("guide.select", &json!({"indexes": [0, 1], "toggle": true})).unwrap();
+    s.execute("object.transform", &json!({"ids": [a.0], "matrix": [1, 0, 0, 1, 40, 50]})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (50.0, 60.0));
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0)]);
+    s.execute("edit.undo", &json!({})).unwrap();
+
+    // 6. Interactive preview copies: dragging with Alt previews the copies and commit keeps them.
+    s.begin_interaction("Move").unwrap();
+    s.preview("object.transform", &json!({"matrix": [1, 0, 0, 1, 10, 20], "copy": true})).unwrap();
+    s.preview("object.transform", &json!({"matrix": [1, 0, 0, 1, 30, 40], "copy": true})).unwrap();
+    s.commit_interaction().unwrap();
+    assert_eq!(guides(&s).len(), 4);
+    assert_eq!(guides(&s)[2], (true, 230.0));
+    assert_eq!(guides(&s)[3], (false, 340.0));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0)]);
+
+    // 7. Dragging a guide (guide.move) when art is also selected moves both art and guides.
+    sel(&mut s, &[a]);
+    s.execute("guide.select", &json!({"indexes": [0, 1], "toggle": true})).unwrap();
+    s.execute("guide.move", &json!({"dx": 10, "dy": 20})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (20.0, 30.0));
+    assert_eq!(guides(&s), vec![(true, 210.0), (false, 320.0)]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[a], false).unwrap();
+    assert_eq!((b.x0, b.y0), (10.0, 10.0));
+    assert_eq!(guides(&s), vec![(true, 200.0), (false, 300.0)]);
+
+    // 8. Copy-dragging a guide (guide.move { copy: true }) when art is also selected duplicates both.
+    s.execute("guide.move", &json!({"dx": 10, "dy": 20, "copy": true})).unwrap();
+    assert_eq!(guides(&s).len(), 4);
+    assert_eq!(guides(&s)[2], (true, 210.0));
+    assert_eq!(guides(&s)[3], (false, 320.0));
+    assert_eq!(s.doc().unwrap().doc.layers[0].children().unwrap().len(), 2);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(guides(&s).len(), 2);
+    assert_eq!(s.doc().unwrap().doc.layers[0].children().unwrap().len(), 1);
 }
 
 /// #451: an artboard guide (`guide.add {artboard}`) runs across its artboard only, and is moved,
@@ -1977,6 +2446,24 @@ fn crop_image_trim_cuts_to_the_opaque_pixels_as_they_are() {
     let r = s.execute("object.cropImage", &json!({"trim": true})).unwrap();
     assert_eq!((r["trimmed"].as_bool(), r["width"].as_u64()), (Some(false), Some(30)), "{r}");
     assert_eq!(bounds(&s, img), b);
+}
+
+#[test]
+fn crop_image_trim_checks_the_rgba_size_before_decoding() {
+    // 1-bit gray PNGs, header only: their samples are within the decoder's limit, and as RGBA
+    // (4 bytes a pixel) they are just over or just within the 2 GB allowance.
+    let trim = |w: u32, h: u32| {
+        let png = super::tests_linkspanel::png_header(w, h);
+        let mut s = Session::new();
+        s.execute("document.open", &json!({"name": "wall.png", "dataBase64": vectorcraft_format::base64_encode(&png)})).unwrap();
+        s.execute("select.all", &json!({})).unwrap();
+        s.execute("object.cropImage", &json!({"trim": true})).unwrap_err().to_string()
+    };
+    let over = trim(23_171, 23_170);
+    assert!(over.contains("an image of 23171 × 23170 pixels is too large to draw"), "{over}");
+    // One column fewer is within the allowance: it is decoded, and its missing rows can't be read.
+    let within = trim(23_170, 23_170);
+    assert!(within.contains("the image's pixels can't be read"), "{within}");
 }
 
 #[test]

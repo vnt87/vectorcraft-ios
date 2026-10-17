@@ -12,6 +12,7 @@ pub mod colortheme;
 mod create;
 mod css;
 mod cut;
+pub(crate) mod dimension;
 pub(crate) mod distortcmds;
 mod docinfo;
 mod docmenu;
@@ -33,6 +34,7 @@ mod halftone;
 pub mod help;
 pub mod importmatches;
 pub(crate) mod inline;
+mod intertwine;
 mod layer;
 mod layerpanel;
 pub mod library;
@@ -202,6 +204,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(recolor::specs());
         v.extend(fileio::specs());
         v.extend(create::specs());
+        v.extend(dimension::specs());
         v.extend(object::specs());
         v.extend(path::specs());
         v.extend(select::specs());
@@ -248,6 +251,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(shaper::specs());
         v.extend(brushsym::specs());
         v.extend(patterncmds::specs());
+        v.extend(intertwine::specs());
         v.extend(prefscmds::specs());
         v.extend(distortcmds::specs());
         v.extend(paint::proxy_specs());
@@ -306,6 +310,17 @@ pub(crate) fn f64_or(p: &Value, key: &str, default: f64) -> f64 {
 pub(crate) fn f64_req(p: &Value, key: &str, cmd: &str) -> Result<f64> {
     p.get(key).and_then(Value::as_f64).ok_or_else(|| bad(cmd, format!("missing number `{key}`")))
 }
+/// Error unless each of `keys` that `p` gives is a number (or null): an optional number read with
+/// [`f64_or`] would otherwise fall back to its default for a string such as `"60 mm"` (#1952).
+pub(crate) fn check_numbers(p: &Value, keys: &[&str], cmd: &str) -> Result<()> {
+    for key in keys {
+        match p.get(*key) {
+            None | Some(Value::Null) | Some(Value::Number(_)) => {}
+            Some(v) => return Err(bad(cmd, format!("`{key}` must be a number, not {v}"))),
+        }
+    }
+    Ok(())
+}
 pub(crate) fn bool_or(p: &Value, key: &str, default: bool) -> bool {
     p.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
@@ -325,9 +340,10 @@ pub(crate) fn checked_ids_param(s: &Session, p: &Value, key: &str, command: &str
     values.iter().map(|value| checked_id(s, value, command)).collect()
 }
 
-/// The objects a command acts on: `ids` when given (every one checked), else the selected objects.
+/// The objects a command acts on: `ids` when given (every one checked, and those inside another
+/// given one dropped), else the selected objects.
 pub(crate) fn checked_ids_or_selection(s: &Session, p: &Value, command: &str) -> Result<Vec<NodeId>> {
-    if p.get("ids").is_some() { checked_ids_param(s, p, "ids", command) } else { edit::selected_roots(s) }
+    if p.get("ids").is_some() { Ok(edit::outermost(&s.doc()?.doc, checked_ids_param(s, p, "ids", command)?)) } else { edit::selected_roots(s) }
 }
 
 pub(crate) fn checked_id(s: &Session, value: &Value, command: &str) -> Result<NodeId> {

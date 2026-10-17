@@ -6,7 +6,7 @@ use vectorcraft_doc::{ArrowAlign, Document, LineCap, LineJoin, Node, NodeKind, S
 
 use crate::Session;
 
-fn rect_json(r: Option<vectorcraft_geom::Rect>) -> Value {
+pub(crate) fn rect_json(r: Option<vectorcraft_geom::Rect>) -> Value {
     match r {
         Some(r) => json!({ "x": r.x0, "y": r.y0, "width": r.width(), "height": r.height() }),
         None => Value::Null,

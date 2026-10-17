@@ -1,5 +1,5 @@
 //! Object → Expand: live shapes, type and effects (Object), strokes (Stroke) and gradient fills
-//! (Fill) into plain art in one undo step; blends and repeats become groups of their steps and instances. Placed documents (Object) become editable copies of the
+//! (Fill) into plain art in one undo step; blends, repeats and Intertwine groups become groups of their steps, of their instances and of what they draw. Placed documents (Object) become editable copies of the
 //! art they show, their resources joining the document. A linear or radial gradient fill becomes a
 //! gradient mesh, or solid strips / concentric ellipses, inside a clip group shaped like the object; a freeform
 //! gradient becomes a mesh shaped like the object. Create Gradient Mesh shares the sampling.
@@ -37,7 +37,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Expand…",
             ["Object"],
             None,
-            "{object?: true (type → outlines, live shapes → paths, effects baked, blends → groups of their steps, repeats → groups of their instances, envelopes → their distorted content, placed documents → editable copies of their art, as placing the file without link gives, its symbols, patterns, swatches and images joining the document), fill?: true (gradient fills → `gradient` art), stroke?: true (strokes → filled outlines), gradient?: \"objects\" (default: `steps` solid strips, concentric ellipses for radial gradients) | \"mesh\" (a gradient mesh); both in a clip group shaped like the object (freeform gradients always become a mesh shaped like it), steps?: 1..1000 (255)} one undo step → {ids}",
+            "{object?: true (type → outlines, live shapes → paths, effects baked, blends → groups of their steps, repeats → groups of their instances, Intertwine groups → groups of their objects and of the parts drawn over the others (clip groups), envelopes → their distorted content, placed documents → editable copies of their art, as placing the file without link gives, its symbols, patterns, swatches and images joining the document), fill?: true (gradient fills → `gradient` art), stroke?: true (strokes → filled outlines), gradient?: \"objects\" (default: `steps` solid strips, concentric ellipses for radial gradients) | \"mesh\" (a gradient mesh); both in a clip group shaped like the object (freeform gradients always become a mesh shaped like it), steps?: 1..1000 (255)} one undo step → {ids}",
             has_selection,
             expand
         ),
@@ -108,6 +108,8 @@ struct Expandable {
     placed: bool,
     /// Repeats (Object expands them into groups of their instances).
     repeats: bool,
+    /// Intertwine groups (Object expands them into groups of what they draw).
+    intertwines: bool,
 }
 
 impl Expandable {
@@ -123,6 +125,7 @@ impl Expandable {
                 e.blends |= matches!(c.kind, NodeKind::Blend { .. });
                 e.placed |= matches!(c.kind, NodeKind::PlacedDocument(_));
                 e.repeats |= matches!(c.kind, NodeKind::Repeat(_));
+                e.intertwines |= matches!(c.kind, NodeKind::Intertwine { .. });
                 e.stroke |= shape && !c.appearance.stroke_paint().is_none();
                 e.fill |= match &c.kind {
                     NodeKind::Text(t) => t.runs.iter().any(|r| matches!(r.style.fill, Paint::Gradient(_))),
@@ -134,7 +137,7 @@ impl Expandable {
     }
 
     fn object(&self) -> bool {
-        self.text || self.live || self.effects || self.envelope || self.blends || self.placed || self.repeats
+        self.text || self.live || self.effects || self.envelope || self.blends || self.placed || self.repeats || self.intertwines
     }
 }
 
@@ -161,6 +164,12 @@ fn expand(s: &mut Session, p: &Value) -> Result<Value> {
     if object && e.placed {
         let roots = selected_roots(s)?;
         s.edit("Expand", |d, _| expand_placed_under(d, &roots))?;
+    }
+    // Intertwine groups before what they hold: their objects, and the copies of the parts drawn
+    // over the others, expand below.
+    if object && e.intertwines {
+        let roots = selected_roots(s)?;
+        s.edit("Expand", |d, _| super::intertwine::expand_intertwines(d, &roots).map(|_| ()))?;
     }
     // Blends first: what their steps hold (type, effects, strokes, gradients) expands below.
     if object && e.blends {

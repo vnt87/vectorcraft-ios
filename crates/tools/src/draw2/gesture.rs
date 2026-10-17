@@ -33,6 +33,11 @@ pub struct GestureTool {
     pub size: f64,
     /// Fill new pencil/brush strokes.
     pub fill: bool,
+    /// "Keep selected": select the path a Pencil, Paintbrush or Blob Brush stroke draws, continues
+    /// or merges into (on for the Pencil and Paintbrush, off for the Blob Brush).
+    pub keep_selected: bool,
+    /// "Merge only with selection": a Blob Brush stroke merges only with selected paths.
+    pub merge_only_selection: bool,
     /// "Edit selected paths within N pixels".
     pub edit_within: f64,
     /// "Close paths when ends are within N pixels".
@@ -64,6 +69,8 @@ impl GestureTool {
             fidelity,
             size: 10.0,
             fill: false,
+            keep_selected: id != "blobBrush",
+            merge_only_selection: false,
             edit_within: 12.0,
             close_within: 15.0,
             snap: DrawSnap::default(),
@@ -144,6 +151,7 @@ impl GestureTool {
             "closed": closed,
             "style": if self.id == "paintbrush" { "brush" } else { "pencil" },
             "fill": self.fill,
+            "keepSelected": self.keep_selected,
         });
         if let Some((id, start)) = self.extend {
             v["extend"] = json!({"id": id.0, "end": if start { "start" } else { "end" }});
@@ -164,7 +172,15 @@ impl GestureTool {
                 let closed = m.alt || (self.extend.is_none() && near);
                 vec![Action::Preview("path.freehand".into(), self.freehand_params(closed)), Action::Commit]
             }
-            "blobBrush" => vec![Action::Exec("path.blob".into(), json!({"points": points_json(pts), "size": self.size}))],
+            "blobBrush" => vec![Action::Exec(
+                "path.blob".into(),
+                json!({
+                    "points": points_json(pts),
+                    "size": self.size,
+                    "keepSelected": self.keep_selected,
+                    "mergeOnlySelection": self.merge_only_selection
+                }),
+            )],
             "eraser" => vec![Action::Exec("path.eraseRegion".into(), json!({"points": points_json(pts), "size": self.size}))],
             "knife" if pts.len() >= 2 => vec![Action::Exec("path.knife".into(), json!({"points": points_json(pts)}))],
             "smooth" if has_sel && pts.len() >= 2 => {
@@ -296,15 +312,31 @@ impl Tool for GestureTool {
         o
     }
     fn cursor(&self, _cx: &ToolContext, _p: Point, _m: Mods) -> Cursor {
-        Cursor::Crosshair
+        match self.id {
+            "paintbrush" => Cursor::Paintbrush,
+            "blobBrush" => Cursor::BlobBrush,
+            "eraser" => Cursor::Eraser,
+            "knife" => Cursor::Knife,
+            "smooth" => Cursor::Smooth,
+            "pathEraser" => Cursor::PathEraser,
+            "join" => Cursor::Join,
+            _ => Cursor::Pencil,
+        }
     }
     fn options(&self) -> Value {
         match self.id {
             "pencil" | "paintbrush" => {
-                json!({"fidelity": self.fidelity, "fill": self.fill, "editWithin": self.edit_within, "closeWithin": self.close_within})
+                json!({
+                    "fidelity": self.fidelity,
+                    "fill": self.fill,
+                    "keepSelected": self.keep_selected,
+                    "editWithin": self.edit_within,
+                    "closeWithin": self.close_within
+                })
             }
             "smooth" => json!({"fidelity": self.fidelity}),
-            "blobBrush" | "eraser" => json!({"size": self.size}),
+            "blobBrush" => json!({"size": self.size, "keepSelected": self.keep_selected, "mergeOnlySelection": self.merge_only_selection}),
+            "eraser" => json!({"size": self.size}),
             _ => Value::Null,
         }
     }
@@ -313,6 +345,8 @@ impl Tool for GestureTool {
             "fidelity" => self.fidelity = v.as_f64().unwrap_or(self.fidelity).clamp(0.05, 100.0),
             "size" => self.size = v.as_f64().unwrap_or(self.size).clamp(0.1, 1000.0),
             "fill" => self.fill = v.as_bool().unwrap_or(self.fill),
+            "keepSelected" => self.keep_selected = v.as_bool().unwrap_or(self.keep_selected),
+            "mergeOnlySelection" => self.merge_only_selection = v.as_bool().unwrap_or(self.merge_only_selection),
             "editWithin" => self.edit_within = v.as_f64().unwrap_or(self.edit_within).clamp(0.0, 100.0),
             "closeWithin" => self.close_within = v.as_f64().unwrap_or(self.close_within).clamp(0.0, 100.0),
             _ => {}
@@ -393,6 +427,49 @@ mod tests {
         assert!(matches!(&last[0], Action::Preview(_, v) if v["closed"] == false && v["style"] == "pencil"));
         assert_eq!(last[1], Action::Commit);
         assert!(!t.busy());
+    }
+
+    /// Keep selected is on by default, and every Pencil and Paintbrush preview sends it.
+    #[test]
+    fn pencil_and_paintbrush_send_keep_selected() {
+        let (d, _) = doc_with_rect();
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        for id in ["pencil", "paintbrush"] {
+            let mut t = GestureTool::new(id);
+            assert_eq!(t.options()["keepSelected"], json!(true), "{id}");
+            for keep in [true, false] {
+                t.set_option("keepSelected", &json!(keep));
+                assert_eq!(t.options()["keepSelected"], json!(keep), "{id}");
+                let acts = drag(&mut t, &cx, &[(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)], Mods::default());
+                assert!(acts[1..].iter().all(|a| a.iter().all(|a| !matches!(a, Action::Preview(_, v) if v["keepSelected"] != keep))), "{id}");
+                assert!(matches!(&acts.last().unwrap()[0], Action::Preview(_, v) if v["keepSelected"] == keep), "{id}");
+            }
+        }
+    }
+
+    /// The Blob Brush has Keep selected and Merge only with selection, both off by default, and its
+    /// stroke sends both.
+    #[test]
+    fn blob_brush_sends_keep_selected_and_merge_only_with_selection() {
+        let (d, _) = doc_with_rect();
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = GestureTool::new("blobBrush");
+        assert_eq!((t.options()["keepSelected"].clone(), t.options()["mergeOnlySelection"].clone()), (json!(false), json!(false)));
+        for (keep, only) in [(false, false), (true, false), (false, true)] {
+            t.set_option("keepSelected", &json!(keep));
+            t.set_option("mergeOnlySelection", &json!(only));
+            let acts = drag(&mut t, &cx, &[(50.0, 150.0), (250.0, 150.0)], Mods::default());
+            assert!(
+                matches!(&acts[2][0], Action::Exec(c, v) if c == "path.blob" && v["keepSelected"] == keep && v["mergeOnlySelection"] == only),
+                "{acts:?}"
+            );
+        }
+        // The Eraser keeps Size only.
+        assert_eq!(GestureTool::new("eraser").options(), json!({"size": 10.0}));
     }
 
     #[test]

@@ -387,3 +387,34 @@ fn layout_cache_follows_fonts_added_later() {
     assert!(FontDb::global().add_font(font) > 0, "the test font is new to this process");
     assert!(!Arc::ptr_eq(&before, &tool.layout(t)), "a font added after the layout must refresh it");
 }
+
+#[test]
+fn escape_returns_to_previous_tool_when_set() {
+    let (d, _id, mut tool) = editing("Hello");
+    tool.set_option("prevTool", &json!("directSelection"));
+    let acts = key(&mut tool, &d, ToolKey::Escape, Mods::default());
+    assert_eq!(acts.last(), Some(&Action::SwitchTool("directSelection".into())));
+
+    // Without prevTool set, Escape defaults to Selection tool.
+    let (d2, _id2, mut tool2) = editing("World");
+    let acts2 = key(&mut tool2, &d2, ToolKey::Escape, Mods::default());
+    assert_eq!(acts2.last(), Some(&Action::SwitchTool("selection".into())));
+}
+
+/// Selected area type whose text doesn't fit its frame shows the red out port with any tool, not
+/// only the Type tools (#2323); text that fits shows none.
+#[test]
+fn overflowing_selected_type_shows_its_marker_without_the_type_tool() {
+    let (mut d, id) = crate::testutil::doc_with_area_type();
+    let (mut sel, p) = (Selection::default(), paint());
+    sel.set([id]);
+    let mut marks = OverflowMarks::default();
+    assert!(overflow_markers(&mut marks, &cx(&d, &sel, &p)).is_empty(), "the text fits");
+    if let Some(NodeKind::Text(t)) = d.node_mut(id).map(|n| &mut n.kind) {
+        t.runs = vec![TextRun::new("Words that fill more than the frame holds. ".repeat(20), CharStyle { size: 20.0, ..Default::default() })];
+    }
+    let ov = overflow_markers(&mut marks, &cx(&d, &sel, &p));
+    assert_eq!(ov.len(), 3, "a box and a plus: {ov:?}");
+    sel.clear();
+    assert!(overflow_markers(&mut marks, &cx(&d, &sel, &p)).is_empty(), "only selected type shows it");
+}

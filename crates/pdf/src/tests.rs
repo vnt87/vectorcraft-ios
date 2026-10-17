@@ -286,6 +286,32 @@ fn gradients_exported_as_shadings_and_reimported() {
 }
 
 #[test]
+fn smooth_revolve_exports_axial_vector_shading_without_images_and_keeps_the_source_live() {
+    let mut d = doc(200.0, 200.0);
+    let bp = vectorcraft_geom::BezPath::from_svg("M100 30 C140 50 140 120 100 160").unwrap();
+    let mut n = Node::path(NodeId(0), PathData::from_bezpath(&bp), Appearance::basic(Paint::solid(Color::rgb(0.2, 0.55, 0.9)), Paint::None, 0.0));
+    n.appearance.effects.push(vectorcraft_doc::Effect {
+        id: "threeD.revolve".into(),
+        visible: true,
+        params: serde_json::json!({"offset":20,"rotationX":-25,"cap":true,"segments":16}),
+    });
+    add(&mut d, n);
+    let before = d.clone();
+    let pdf = uncompressed(&d).replace(' ', "");
+    assert!(pdf.matches("/ShadingType2").count() > 50);
+    assert!(!pdf.contains("/Subtype/Image"));
+    assert_eq!(d, before);
+    let back = roundtrip(&d);
+    let strokes: Vec<_> = leaves(&back)
+        .into_iter()
+        .flat_map(|n| n.appearance.items.iter())
+        .filter_map(|i| if let AppearanceItem::Stroke(s) = i { Some(s) } else { None })
+        .collect();
+    assert!(strokes.len() >= 2, "continuous cap rims remain vector strokes");
+    assert!(strokes.iter().all(|s| s.join == LineJoin::Round), "seam strokes keep round joins in PDF");
+}
+
+#[test]
 fn hidden_objects_and_template_layers_skipped() {
     let mut d = doc(200.0, 200.0);
     add(&mut d, rect_node(Rect::new(10.0, 10.0, 50.0, 50.0), Color::BLACK));
@@ -510,6 +536,36 @@ fn image_roundtrip() {
     let decoded = image::load_from_memory(&blob.bytes).unwrap().to_rgba8();
     assert_eq!(decoded.get_pixel(0, 0).0, [255, 0, 0, 255]);
     assert_eq!(decoded.get_pixel(3, 0).0, [0, 0, 0, 255]);
+}
+
+/// #2023: a group's Transform effect copies an image among its members as it does the paths: the
+/// PDF draws the image three times, where the effect put it.
+#[test]
+fn a_group_transform_effect_exports_its_image_copies() {
+    let mut d = doc(200.0, 100.0);
+    d.images.insert("img1".into(), ImageBlob::new("image/png", tiny_png()));
+    let im = ImageObject {
+        key: "img1".into(),
+        width: 4,
+        height: 2,
+        xf: Affine::translate((20.0, 30.0)) * Affine::scale(5.0),
+        link: None,
+        placement: Default::default(),
+    };
+    let image = Arc::new(Node::new(d.alloc_id(), NodeKind::Image(Box::new(im))));
+    let mut square = rect_node(Rect::new(20.0, 60.0, 30.0, 70.0), Color::BLACK);
+    square.id = d.alloc_id();
+    let mut g = Node::group(NodeId(0), vec![Arc::new(square), image]);
+    g.appearance.effects.push(vectorcraft_doc::Effect {
+        id: "distort.transform".into(),
+        params: serde_json::json!({"moveH": 50, "copies": 2}),
+        visible: true,
+    });
+    add(&mut d, g);
+    let out = roundtrip(&d);
+    let lefts: Vec<f64> =
+        leaves(&out).iter().filter(|n| matches!(n.kind, NodeKind::Image(_))).filter_map(|n| n.geometric_bounds()).map(|b| b.x0.round()).collect();
+    assert_eq!(lefts, [20.0, 70.0, 120.0]);
 }
 
 /// Build a PDF with a correct xref table from object bodies.
@@ -780,10 +836,16 @@ fn functions_and_colour_spaces_built_on_themselves_are_refused() {
         ("procedures in procedures", &shaded, vec![calculator(&format!("{}{}", "{".repeat(100), "}".repeat(100)))]),
         ("a colour space on itself", &filled, vec![indexed(&me)]),
         ("two colour spaces on each other", &filled, vec![indexed(&next), indexed(&me)]),
+        // Its leading items are read by the interpreter all the same: an item that can't be read
+        // (a stream of an external file) after them doesn't hide them.
+        ("a function stitching itself, then an item that can't be read", &shaded, vec![stitch(&format!("{me} << /F (x) >> stream"))]),
+        ("a colour space on itself, then an item that can't be read", &filled, vec![format!("[/Indexed {me} 1 <000000ffffff> << /F (x) >> stream]")]),
     ] {
         let objects: Vec<&str> = objects.iter().map(String::as_str).collect();
         let e = import(&pdf_with(std::slice::from_ref(page), &objects, None)).err().map(|e| e.to_string());
-        assert!(e.as_deref().is_some_and(|e| e.contains("built on one another without end")), "{what}: {e:?}");
+        // A damaged array is refused as damaged: what it holds can't be looked at whole.
+        let refused = |e: &str| e.contains("built on one another without end") || e.contains("is damaged and can't be read");
+        assert!(e.as_deref().is_some_and(refused), "{what}: {e:?}");
     }
     for (what, page, objects) in [
         ("a function stitching one", &shaded, vec![stitch(&next), ramp.to_string()]),
@@ -794,5 +856,28 @@ fn functions_and_colour_spaces_built_on_themselves_are_refused() {
         let objects: Vec<&str> = objects.iter().map(String::as_str).collect();
         let d = import(&pdf_with(std::slice::from_ref(page), &objects, None)).unwrap_or_else(|e| panic!("{what}: {e}"));
         assert!(d.layers.iter().any(|l| l.children().is_some_and(|c| !c.is_empty())), "{what}: its art is read");
+    }
+}
+
+/// A dictionary value the reader can't parse (a name with a broken `#` escape, a number with a
+/// stray `-`) is left out of the nesting check, which goes on with the rest of the file: a file
+/// whose shading has a plain function is read, and one whose function stitches itself is refused.
+#[test]
+fn dictionary_values_the_reader_cannot_parse_are_skipped() {
+    use vectorcraft_testkit::pdf::{PdfPage, first_extra, pdf_with};
+    let me = format!("{} 0 R", first_extra(1));
+    let shaded = PdfPage {
+        resources: format!("/Shading << /S << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Function {me} >> >>"),
+        ..PdfPage::new(100.0, 100.0, "/S sh")
+    };
+    let ramp = "<< /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>";
+    let stitch = format!("<< /FunctionType 3 /Domain [0 1] /Functions [{me}] /Bounds [] /Encode [0 1] >>");
+    for junk in ["<< /A /#zz >>", "<< /A 12-.5 >>"] {
+        let [plain, looped] = [ramp, stitch.as_str()].map(|f| pdf_with(std::slice::from_ref(&shaded), &[f, junk], None));
+        assert_eq!(info(&plain, None).map(|i| i.pages.len()).ok(), Some(1), "{junk}");
+        let d = import(&plain).unwrap_or_else(|e| panic!("{junk}: {e}"));
+        assert!(d.layers.iter().any(|l| l.children().is_some_and(|c| !c.is_empty())), "{junk}: its art is read");
+        let e = import(&looped).err().map(|e| e.to_string());
+        assert!(e.as_deref().is_some_and(|e| e.contains("built on one another without end")), "{junk}: {e:?}");
     }
 }

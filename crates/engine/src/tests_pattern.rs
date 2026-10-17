@@ -354,6 +354,35 @@ fn radial_repeat_wraps_selection() {
     assert_eq!(n.kind_label(), "Radial Repeat");
 }
 
+/// Repeat given `ids` that list an object and a group that holds it (directly, or inside another
+/// group) repeats the outer group, which holds the object once, as it does with those objects
+/// selected.
+#[test]
+fn repeat_of_an_object_and_a_group_that_holds_it_repeats_the_group() {
+    let nested = || {
+        let mut s = session();
+        let (a, b) = (rect(&mut s, 195.0, 95.0, 10.0, 10.0), rect(&mut s, 215.0, 95.0, 10.0, 10.0));
+        sel(&mut s, &[a, b]);
+        let inner = id_of(&s.execute("object.group", &json!({})).unwrap());
+        let c = rect(&mut s, 235.0, 95.0, 10.0, 10.0);
+        sel(&mut s, &[inner, c]);
+        let outer = id_of(&s.execute("object.group", &json!({})).unwrap());
+        s.execute("select.none", &json!({})).unwrap();
+        (s, [a, inner, outer])
+    };
+    for (picks, group) in [(&[0, 1][..], 1), (&[1, 0, 2], 2)] {
+        let (mut given, ids) = nested();
+        let list: Vec<NodeId> = picks.iter().map(|i| ids[*i]).collect();
+        let v = given.execute("object.repeat.radial", &json!({ "ids": list.iter().map(|i| i.0).collect::<Vec<_>>() })).unwrap();
+        let NodeKind::Repeat(spec) = node(&given, id_of(&v)).kind else { panic!("{v}") };
+        assert_eq!(spec.source.iter().map(|n| n.id).collect::<Vec<_>>(), [ids[group]]);
+        let (mut selected, _) = nested();
+        sel(&mut selected, &list);
+        selected.execute("object.repeat.radial", &json!({})).unwrap();
+        assert!(doc(&given).layers == doc(&selected).layers, "ids {list:?}");
+    }
+}
+
 #[test]
 fn radial_instance_transforms_rotate_around_center() {
     let mut s = session();
@@ -529,4 +558,54 @@ fn repeat_commands_validate() {
     assert!(s.execute("object.repeat.options", &json!({"instances": 4})).is_err(), "no repeat selected");
     s.execute("select.none", &json!({})).ok();
     assert!(s.execute("object.pattern.make", &json!({})).is_err());
+}
+
+/// #1970: picking another pattern swatch keeps the transform the fill already had; a fill that was
+/// a colour gets the pattern untransformed.
+#[test]
+fn picking_another_pattern_swatch_keeps_the_pattern_transform() {
+    let mut s = session();
+    make_dots(&mut s);
+    let bars = rect(&mut s, 0.0, 0.0, 20.0, 10.0);
+    s.execute("paint.setFill", &json!({"ids": [bars.0], "color": "#0000ff"})).unwrap();
+    s.execute("object.pattern.make", &json!({"ids": [bars.0], "name": "Bars", "edit": false})).unwrap();
+    let big = rect(&mut s, 20.0, 20.0, 200.0, 200.0);
+    s.execute("paint.setFill", &json!({"ids": [big.0], "color": "#00ff00"})).unwrap();
+    s.execute("paint.setFill", &json!({"ids": [big.0], "swatch": "Bars"})).unwrap();
+    let Paint::Pattern { xf, .. } = node(&s, big).appearance.fill_paint() else { panic!() };
+    assert_eq!(xf.as_coeffs(), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    s.execute("paint.setFill", &json!({"ids": [big.0], "swatch": "Dots"})).unwrap();
+    s.execute("pattern.transform", &json!({"ids": [big.0], "matrix": [2, 0, 0, 2, 15, 10]})).unwrap();
+    s.execute("paint.setFill", &json!({"ids": [big.0], "swatch": "Bars"})).unwrap();
+    let Paint::Pattern { pattern, xf } = node(&s, big).appearance.fill_paint() else { panic!() };
+    assert_eq!(pattern, "Bars");
+    assert_eq!(xf.as_coeffs(), [2.0, 0.0, 0.0, 2.0, 15.0, 10.0]);
+    // The Appearance panel picks the swatch for one fill through `appearance.setItem`.
+    let index = node(&s, big).appearance.items.iter().position(|it| matches!(it, vectorcraft_doc::AppearanceItem::Fill(_))).unwrap();
+    s.execute("appearance.setItem", &json!({"ids": [big.0], "index": index, "swatch": "Dots"})).unwrap();
+    let Paint::Pattern { pattern, xf } = node(&s, big).appearance.fill_paint() else { panic!() };
+    assert_eq!(pattern, "Dots");
+    assert_eq!(xf.as_coeffs(), [2.0, 0.0, 0.0, 2.0, 15.0, 10.0]);
+}
+
+#[test]
+fn inner_glow_on_a_pattern_fill_stays_inside_the_object_on_the_threaded_renderer() {
+    // #2426: the glow's pixmap was drawn with the pattern's paint transform, so it landed
+    // scaled at the top left instead of along the object's edges.
+    let mut s = session();
+    make_dots(&mut s);
+    let bg = rect(&mut s, 0.0, 0.0, 400.0, 400.0);
+    s.execute("paint.setFill", &json!({"ids": [bg.0], "color": "#223344"})).unwrap();
+    let big = rect(&mut s, 100.0, 100.0, 150.0, 150.0);
+    s.execute("paint.setFill", &json!({"ids": [big.0], "swatch": "Dots"})).unwrap();
+    sel(&mut s, &[big]);
+    s.execute("effect.apply", &json!({"effect": "stylize.innerGlow", "params": {"blur": 10}})).unwrap();
+    let mut r = vectorcraft_render::Renderer::new();
+    r.threads = 2;
+    let view = Affine::scale(1.5) * Affine::translate((-20.0, -30.0));
+    let out = r.render(&s.doc().unwrap().doc, 400, 400, view, &Default::default());
+    let [red, ..] = out.pixel(110, 100);
+    assert!(red < 0x30, "glow outside the object: red {red}");
+    let [red, ..] = out.pixel(123, 200);
+    assert!(red > 0x40, "no glow along the edge: red {red}");
 }

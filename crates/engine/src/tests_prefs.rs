@@ -391,13 +391,22 @@ fn use_precise_cursors_swaps_the_tools_own_pointers_for_a_crosshair() {
         ("pen", Cursor::Pen),
         ("addAnchor", Cursor::PenAdd),
         ("deleteAnchor", Cursor::PenDelete),
-        ("anchorPoint", Cursor::Pen),
-        ("curvature", Cursor::Pen),
-        ("mesh", Cursor::PenAdd),
+        ("anchorPoint", Cursor::AnchorPoint),
+        ("curvature", Cursor::Curvature),
+        ("mesh", Cursor::MeshAdd),
         ("eyedropper", Cursor::Eyedropper),
         ("slice", Cursor::Slice),
         ("blend", Cursor::Blend),
         ("shapeBuilder", Cursor::ShapeBuilder),
+        ("paintbrush", Cursor::Paintbrush),
+        ("blobBrush", Cursor::BlobBrush),
+        ("shaper", Cursor::Shaper),
+        ("pencil", Cursor::Pencil),
+        ("smooth", Cursor::Smooth),
+        ("pathEraser", Cursor::PathEraser),
+        ("join", Cursor::Join),
+        ("eraser", Cursor::Eraser),
+        ("knife", Cursor::Knife),
     ];
     for (tool, c) in own {
         assert_eq!(cursor(&mut s, tool), c, "{tool} off");
@@ -415,15 +424,6 @@ fn use_precise_cursors_swaps_the_tools_own_pointers_for_a_crosshair() {
         "polygon",
         "star",
         "flare",
-        "paintbrush",
-        "blobBrush",
-        "shaper",
-        "pencil",
-        "smooth",
-        "pathEraser",
-        "join",
-        "eraser",
-        "knife",
         "mirrorCut",
         "lineCut",
         "rectCut",
@@ -440,7 +440,7 @@ fn use_precise_cursors_swaps_the_tools_own_pointers_for_a_crosshair() {
         assert_eq!(cursor(&mut s, tool), Cursor::Crosshair, "{tool} on");
     }
     assert_eq!(cursor(&mut s, "type"), Cursor::Text);
-    assert_eq!(cursor(&mut s, "scissors"), Cursor::NotAllowed);
+    assert_eq!(cursor(&mut s, "scissors"), Cursor::ScissorsNotAllowed);
     s.execute("prefs.set", &json!({"key": "usePreciseCursors", "value": false})).unwrap();
     for (tool, c) in own {
         assert_eq!(cursor(&mut s, tool), c, "{tool} off again");
@@ -453,6 +453,7 @@ fn precise_cursors_replace_every_pen_state() {
     use vectorcraft_tools::Cursor;
     for c in [
         Cursor::Pen,
+        Cursor::PenDrawing,
         Cursor::PenAdd,
         Cursor::PenDelete,
         Cursor::PenClose,
@@ -466,6 +467,8 @@ fn precise_cursors_replace_every_pen_state() {
         Cursor::BlendAnchor,
         Cursor::ShapeBuilder,
         Cursor::ShapeBuilderErase,
+        Cursor::AnchorPoint,
+        Cursor::Curvature,
     ] {
         assert_eq!(c.precise(), Cursor::Crosshair, "{c:?}");
     }
@@ -1018,6 +1021,125 @@ fn type_increments_step_the_type() {
     // The font size shortcut steps the selected text while the tool edits.
     s.execute("type.size.increase", &json!({})).unwrap();
     assert_eq!((style_at(&s, id, 0).size, style_at(&s, id, 6).size), (19.0, 22.0));
+    // The type objects given in `ids` step in full while the tool edits.
+    s.execute("type.step", &json!({"attribute": "size", "ids": [id.0]})).unwrap();
+    assert_eq!((style_at(&s, id, 0).size, style_at(&s, id, 6).size), (22.0, 25.0));
+}
+
+/// Cmd/Ctrl+Alt+Shift+. and , step the font size by five times the Size/Leading increment, on
+/// the selected type objects and on the Type tool's selected text.
+#[test]
+fn font_size_steps_by_five_increments() {
+    use vectorcraft_tools::PointerKind::{Down, Up};
+    let mut s = new_doc();
+    let id = NodeId(s.execute("text.create", &json!({"x": 100, "y": 100, "text": "Hello world", "size": 12})).unwrap()["id"].as_u64().unwrap());
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!(find_command("type.size.increaseByFive").unwrap().shortcut, Some("Cmd+Alt+Shift+."));
+    assert_eq!(find_command("type.size.decreaseByFive").unwrap().shortcut, Some("Cmd+Alt+Shift+,"));
+    s.execute("type.size.increaseByFive", &json!({})).unwrap();
+    assert_eq!(style_at(&s, id, 0).size, 22.0, "five steps of the 2 pt Size/Leading increment");
+    s.execute("type.size.decreaseByFive", &json!({})).unwrap();
+    assert_eq!(style_at(&s, id, 0).size, 12.0);
+    set_pref(&mut s, "typeSizeIncrement", json!(3));
+    s.execute("type.size.increaseByFive", &json!({})).unwrap();
+    assert_eq!(style_at(&s, id, 10).size, 27.0, "the step follows the preference");
+    // While the Type tool edits, only its selected text steps.
+    let v = ViewInfo::default();
+    s.select_tool("type", v).unwrap();
+    gesture(&mut s, v, &[(Down, 102.0, 95.0), (Up, 102.0, 95.0)]);
+    assert_eq!(s.tool_options()["editing"], json!(id.0), "editing the text");
+    s.set_tool_option("select", &json!({"start": 6, "end": 11}));
+    s.execute("type.size.decreaseByFive", &json!({})).unwrap();
+    assert_eq!((style_at(&s, id, 0).size, style_at(&s, id, 6).size), (27.0, 12.0));
+}
+
+/// Cmd/Ctrl+Alt+Q resets tracking to 0 and kerning to Auto (0 in the Character panel) in every
+/// selected type object and in the Type tool's selected text. At a caret it resets only the
+/// kerning of the character before it. It is one undo step. Type objects given in `ids` are reset
+/// in full while the Type tool edits, and the typing in progress ends first.
+#[test]
+fn reset_tracking_sets_tracking_and_kerning_to_zero() {
+    use vectorcraft_tools::PointerKind::{Down, Up};
+    let mut s = new_doc();
+    let id = NodeId(s.execute("text.create", &json!({"x": 100, "y": 100, "text": "Hello world", "size": 20})).unwrap()["id"].as_u64().unwrap());
+    let spaced = |s: &mut Session| s.execute("text.setRangeStyle", &json!({"id": id.0, "tracking": 200, "kerning": -40})).unwrap();
+    let spacing = |s: &Session, byte| {
+        let st = style_at(s, id, byte);
+        (st.tracking, st.kerning)
+    };
+    spaced(&mut s);
+    let other = NodeId(s.execute("text.create", &json!({"x": 100, "y": 300, "text": "Other", "size": 20})).unwrap()["id"].as_u64().unwrap());
+    s.execute("text.setRangeStyle", &json!({"id": other.0, "tracking": 200})).unwrap();
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!(find_command("type.resetTracking").unwrap().shortcut, Some("Cmd+Alt+Q"));
+    assert_eq!(s.execute("type.resetTracking", &json!({})).unwrap()["ids"], json!([id.0]));
+    assert_eq!((spacing(&s, 0), spacing(&s, 10)), ((0.0, None), (0.0, None)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(spacing(&s, 0), (200.0, Some(-40.0)), "one undo step");
+    // With the Type tool, it resets only the selected text.
+    let v = ViewInfo::default();
+    s.select_tool("type", v).unwrap();
+    gesture(&mut s, v, &[(Down, 102.0, 95.0), (Up, 102.0, 95.0)]);
+    assert_eq!(s.tool_options()["editing"], json!(id.0), "editing the text");
+    s.set_tool_option("select", &json!({"start": 0, "end": 5}));
+    s.execute("type.resetTracking", &json!({})).unwrap();
+    assert_eq!((spacing(&s, 4), spacing(&s, 6)), ((0.0, None), (200.0, Some(-40.0))));
+    // At a caret it resets only the kerning of the character before it, and the tracking does not change.
+    s.set_tool_option("select", &json!({"start": 8, "end": 8}));
+    s.execute("type.resetTracking", &json!({})).unwrap();
+    assert_eq!((spacing(&s, 6), spacing(&s, 7), spacing(&s, 8)), ((200.0, Some(-40.0)), (200.0, None), (200.0, Some(-40.0))));
+    // While the Type tool edits, the type objects in `ids` are reset in full.
+    s.execute("type.resetTracking", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!((spacing(&s, 6), spacing(&s, 10)), ((0.0, None), (0.0, None)));
+    // Typing in progress ends first, so the reset of another object stays when typing goes on.
+    s.tool_text("!", v).unwrap();
+    s.execute("type.resetTracking", &json!({"ids": [other.0]})).unwrap();
+    s.tool_text("?", v).unwrap();
+    assert_eq!(style_at(&s, other, 0).tracking, 0.0, "the reset stays");
+}
+
+/// Cmd/Ctrl+Shift+X resets the horizontal scale to 100% in every selected type object and in the
+/// Type tool's selected text, as one undo step, and leaves the vertical scale as it is. At a caret
+/// it leaves the text as it is. On a stretched object the scale the Character panel shows, which includes the
+/// object's own stretch, goes to 100%. Type objects given in `ids` are reset in full while the
+/// Type tool edits.
+#[test]
+fn reset_horizontal_scale_sets_it_to_100_percent() {
+    use vectorcraft_tools::PointerKind::{Down, Up};
+    let mut s = new_doc();
+    let id = NodeId(s.execute("text.create", &json!({"x": 100, "y": 100, "text": "Hello world", "size": 20})).unwrap()["id"].as_u64().unwrap());
+    let scales = |s: &Session, byte| {
+        let st = style_at(s, id, byte);
+        (st.h_scale, st.v_scale)
+    };
+    s.execute("text.setRangeStyle", &json!({"id": id.0, "hScale": 150, "vScale": 80})).unwrap();
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!(find_command("type.resetHorizontalScale").unwrap().shortcut, Some("Cmd+Shift+X"));
+    assert_eq!(s.execute("type.resetHorizontalScale", &json!({})).unwrap()["ids"], json!([id.0]));
+    assert_eq!((scales(&s, 0), scales(&s, 10)), ((100.0, 80.0), (100.0, 80.0)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(scales(&s, 0), (150.0, 80.0), "one undo step");
+    // A type object stretched to twice its width shows 200% and keeps half of it stored.
+    let wide = NodeId(s.execute("text.create", &json!({"x": 100, "y": 300, "text": "Wide", "size": 20})).unwrap()["id"].as_u64().unwrap());
+    s.execute("select.set", &json!({"ids": [wide.0]})).unwrap();
+    s.execute("object.scale", &json!({"sx": 200, "sy": 100})).unwrap();
+    s.execute("type.resetHorizontalScale", &json!({})).unwrap();
+    assert_eq!(style_at(&s, wide, 0).h_scale, 50.0);
+    // With the Type tool, it resets only the selected text.
+    let v = ViewInfo::default();
+    s.select_tool("type", v).unwrap();
+    gesture(&mut s, v, &[(Down, 102.0, 95.0), (Up, 102.0, 95.0)]);
+    assert_eq!(s.tool_options()["editing"], json!(id.0), "editing the text");
+    s.set_tool_option("select", &json!({"start": 0, "end": 5}));
+    s.execute("type.resetHorizontalScale", &json!({})).unwrap();
+    assert_eq!((scales(&s, 4), scales(&s, 6)), ((100.0, 80.0), (150.0, 80.0)));
+    // At a caret it leaves the text as it is.
+    s.set_tool_option("select", &json!({"start": 8, "end": 8}));
+    assert_eq!(s.execute("type.resetHorizontalScale", &json!({})).unwrap()["ids"], json!([]));
+    assert_eq!((scales(&s, 7), scales(&s, 8)), ((150.0, 80.0), (150.0, 80.0)));
+    // While the Type tool edits, the type objects in `ids` are reset in full.
+    s.execute("type.resetHorizontalScale", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!((scales(&s, 6), scales(&s, 10)), ((100.0, 80.0), (100.0, 80.0)));
 }
 
 /// Type › Fill New Type Objects With Placeholder Text (#394, on by default): type the Type tool
@@ -1162,6 +1284,18 @@ fn show_font_names_in_english_preference_is_stored() {
     assert!(!s.prefs.font_names_in_english);
     set_pref(&mut s, "fontNamesInEnglish", json!(true));
     assert!(s.prefs.font_names_in_english);
+}
+
+/// Preferences › Type › Highlight Alternate Glyphs (#394): off by default so OpenType
+/// substitutions are not pink on every canvas until the user turns the preference on.
+#[test]
+fn highlight_alternate_glyphs_preference_is_off_by_default() {
+    let mut s = Session::new();
+    assert!(!s.prefs.highlight_alternate_glyphs, "off by default");
+    set_pref(&mut s, "highlightAlternateGlyphs", json!(true));
+    assert!(s.prefs.highlight_alternate_glyphs);
+    set_pref(&mut s, "highlightAlternateGlyphs", json!(false));
+    assert!(!s.prefs.highlight_alternate_glyphs);
 }
 
 /// Preferences › Hyphenation › Exceptions (#394): `prefs.set` pushes the list into the hyphenator

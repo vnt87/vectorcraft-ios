@@ -130,6 +130,27 @@ fn duplicate_artboard_copies_its_art() {
     assert_eq!(ids(&s.execute("artboard.duplicate", &json!({"index": 0, "art": true})).unwrap()["ids"]).len(), 1);
 }
 
+/// Duplicate, Copy and Cut Artboard and Move Artboard Up/Down fail with `no such artboard` on an
+/// `index` that names no artboard (past the last, negative, fractional, a string or null), and the
+/// artboards, the art and the clipboard stay as they were.
+#[test]
+fn artboard_copies_refuse_an_index_that_names_no_artboard() {
+    let mut s = session();
+    rect(&mut s);
+    s.execute("artboard.new", &json!({})).unwrap();
+    s.set_tool_options(Some("artboard"), json!({"active": 1}).as_object().unwrap());
+    let (was, n) = (boards(&s), s.doc().unwrap().history.undo.len());
+    for index in [json!(99), json!(-1), json!(1.5), json!("1"), serde_json::Value::Null] {
+        for cmd in ["artboard.duplicate", "artboard.copy", "artboard.cut", "artboard.reorder"] {
+            let p = if cmd == "artboard.reorder" { json!({"index": index, "to": 0}) } else { json!({"index": index}) };
+            assert_eq!(s.execute(cmd, &p).unwrap_err().to_string(), "no such artboard", "{cmd} {p}");
+        }
+    }
+    let st = s.doc().unwrap();
+    assert_eq!((boards(&s), st.doc.layers[0].children().unwrap().len(), st.history.undo.len()), (was, 1, n));
+    assert!(s.clipboard.nodes.is_empty() && s.clipboard.artboard.is_none(), "nothing copied");
+}
+
 /// With the Artboard tool, Copy and Paste copy its artboard with the art on it (#446): Paste places
 /// it right of the last artboard, Paste in Place where it was, also in another document; each paste
 /// is one undo step, and the tool takes the pasted artboard.
@@ -195,6 +216,48 @@ fn artboard_tool_cut_removes_the_artboard_and_its_art() {
     s.execute("edit.undo", &json!({})).unwrap();
     let d = &s.doc().unwrap().doc;
     assert_eq!((d.artboards.len(), d.node(r).is_some()), (2, true), "the cut is one undo step");
+}
+
+/// A copy of an artboard whose id is the largest there is (only a hand-made file has one, #1718)
+/// takes an id that no other artboard has, as a new artboard does, whether Duplicate Artboards, the
+/// Artboard tool's Alt-drag (`artboard.move` with `copy`) or Paste makes it. Deleting either
+/// artboard then leaves the other's guides.
+#[test]
+fn copied_artboards_take_a_free_id_and_keep_their_own_guides() {
+    let mut got = vec![];
+    for (cmd, p) in [
+        ("artboard.duplicate", json!({"index": 0})),
+        ("artboard.move", json!({"index": 0, "dx": 0, "dy": 900, "copy": true})),
+        ("edit.paste", json!({})),
+    ] {
+        let mut s = Session::new();
+        let mut d = vectorcraft_doc::Document::new(800.0, 600.0);
+        d.artboards[0].id = u32::MAX;
+        s.add_document(d, None);
+        s.execute("guide.add", &json!({"vertical": true, "pos": 100, "artboard": 0})).unwrap();
+        if cmd == "edit.paste" {
+            s.execute("artboard.copy", &json!({"index": 0})).unwrap();
+        }
+        s.execute(cmd, &p).unwrap();
+        // Each pass deletes one artboard (the copy, then the original), adds the artboard ids of
+        // the remaining guides to `kept`, and undoes the delete.
+        let mut kept = vec![];
+        for i in [1, 0] {
+            s.execute("artboard.delete", &json!({"index": i})).unwrap();
+            kept.push(s.doc().unwrap().doc.guides.iter().map(|g| g.artboard).collect::<Vec<_>>());
+            s.execute("edit.undo", &json!({})).unwrap();
+        }
+        got.push((cmd, s.doc().unwrap().doc.artboards.iter().map(|a| a.id).collect::<Vec<_>>(), kept));
+    }
+    let max = Some(u32::MAX);
+    assert_eq!(
+        got,
+        [
+            ("artboard.duplicate", vec![u32::MAX, 1], vec![vec![max], vec![Some(1)]]),
+            ("artboard.move", vec![u32::MAX, 1], vec![vec![max], vec![Some(1)]]),
+            ("edit.paste", vec![u32::MAX, 1], vec![vec![max], vec![]]),
+        ]
+    );
 }
 
 #[test]

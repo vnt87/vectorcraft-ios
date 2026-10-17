@@ -147,6 +147,28 @@ fn char_cmd(app: &mut VectorcraftApp, cmd: &str, p: Value) {
     range_style(app, p);
 }
 
+/// Set the Kerning field's `value` (a number or "auto"). At a caret in text the Type tool edits
+/// it is the pair kerning after the character before the caret, as Alt+←/→ steps it
+/// (`type.step`); nowhere to set at the start of the text. Else it is a character attribute like
+/// the others: the selected range, or all the text.
+fn set_kerning(app: &mut VectorcraftApp, value: Value) {
+    let Some((id, a, b)) = text_editing(app) else {
+        format(app, json!({"kerning": value}));
+        return;
+    };
+    if b > a {
+        range_style(app, json!({"kerning": value}));
+        return;
+    }
+    let Some(NodeKind::Text(t)) = app.session.active().and_then(|st| st.doc.node(id)).map(|n| &n.kind) else { return };
+    let start = vectorcraft_text::edit::prev_char(&t.plain_text(), a);
+    if start >= a {
+        return;
+    }
+    end_typing(app);
+    app.run("text.setRangeStyle", json!({"id": id.0, "start": start, "end": a, "kerning": value})).ok();
+}
+
 /// The faces Type › Bold and Type › Italic switch to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Face {
@@ -450,7 +472,7 @@ pub(crate) fn metrics_grid(app: &mut VectorcraftApp, ui: &mut Ui, id: &str, s: &
         cell(ui, "VA", tl!("Kerning (0 = Auto)"), |ui| {
             let kerning = shared(app, |s| s.kerning.unwrap_or(0.0));
             if let Some(v) = widgets::spin_plain(ui, "ch-kern", kerning, "", 0, fw, 10.0, -1000.0, &TRACKING_PRESETS) {
-                format(app, if v == 0.0 { json!({"kerning": "auto"}) } else { json!({"kerning": v}) });
+                set_kerning(app, if v == 0.0 { json!("auto") } else { json!(v) });
             }
         });
         cell(ui, "VA↔", tl!("Tracking"), |ui| {
@@ -781,6 +803,30 @@ mod tests {
         app.session.set_tool_option("select", &json!({"start": 0, "end": 4}));
         assert_eq!(shared_effective(&app, |s| s.size), Some(10.0));
         assert_eq!(text_style(&app).unwrap().0.size, 5.0);
+    }
+
+    /// The Kerning field at a caret kerns that pair, not the whole text (#2217).
+    #[test]
+    fn kerning_at_a_caret_sets_the_pair_not_the_whole_text() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.run("file.new", json!({"width": 300, "height": 200})).unwrap();
+        app.session.select_tool("type", Default::default()).unwrap();
+        let id = app.run("text.create", json!({"x": 20, "y": 50, "text": "AVAX", "size": 12})).unwrap()["id"].clone();
+        app.session.apply_actions(vec![vectorcraft_tools::Action::Notify("text.editNew".into())]).unwrap();
+        app.session.set_tool_option("select", &json!({"start": 2, "end": 2}));
+        set_kerning(&mut app, json!(-50));
+        let kerning = |app: &VectorcraftApp, at: usize| {
+            let st = app.session.active().unwrap();
+            let Some(NodeKind::Text(t)) = st.doc.node(NodeId(id.as_u64().unwrap())).map(|n| &n.kind) else { panic!("text") };
+            vectorcraft_text::edit::style_at(&t.runs, at + 1).kerning // the character at `at`
+        };
+        assert_eq!(kerning(&app, 1), Some(-50.0), "the character before the caret");
+        assert_eq!(kerning(&app, 3), None, "the rest is untouched");
+        assert_eq!(kerning(&app, 0), None);
+        // A selected range still takes it whole.
+        app.session.set_tool_option("select", &json!({"start": 2, "end": 4}));
+        set_kerning(&mut app, json!(30));
+        assert_eq!((kerning(&app, 1), kerning(&app, 2), kerning(&app, 3)), (Some(-50.0), Some(30.0), Some(30.0)));
     }
 
     /// Bold and Italic pick the family's own faces by name, and toggle back (#724).

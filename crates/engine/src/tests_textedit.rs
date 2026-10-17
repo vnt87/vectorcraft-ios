@@ -653,3 +653,107 @@ fn a_fill_the_selected_characters_have_records_no_undo_step() {
     s.execute("paint.setStroke", &json!({"color": "#ff0000"})).unwrap();
     assert_eq!(history(&s), before);
 }
+
+fn left(s: &Session, id: NodeId) -> f64 {
+    s.doc().unwrap().doc.bounds_of(&[id], false).unwrap().x0
+}
+
+/// #1881: the Transform panel moving or scaling the type while it is being typed keeps both the
+/// typing and the transformation, however the editing goes on.
+#[test]
+fn a_transform_panel_edit_while_typing_keeps_the_typing_and_the_transform() {
+    let mut s = session();
+    let v = ViewInfo::default();
+    let id = text(&mut s, "Hello");
+    s.select_tool("type", v).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[id], false).unwrap();
+    click(&mut s, b.x1 - 1.0, b.center().y);
+    s.tool_text(" world", v).unwrap();
+    s.execute("object.setBounds", &json!({"x": 400, "reference": 0})).unwrap();
+    assert!((left(&s, id) - 400.0).abs() < 1e-6);
+    // Typing on.
+    s.tool_text("!", v).unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "Hello world!");
+    assert!((left(&s, id) - 400.0).abs() < 1e-6, "the move stays: {}", left(&s, id));
+    s.execute("object.setBounds", &json!({"width": 300, "reference": 0, "proportional": true})).unwrap();
+    let w = |s: &Session| s.doc().unwrap().doc.bounds_of(&[id], false).unwrap().width();
+    assert!((w(&s) - 300.0).abs() < 1e-6);
+    key(&mut s, ToolKey::Escape, Mods::default());
+    assert_eq!(obj(&s, id).plain_text(), "Hello world!");
+    assert!((w(&s) - 300.0).abs() < 1e-6, "the scale stays: {}", w(&s));
+    assert!((left(&s, id) - 400.0).abs() < 1e-6);
+    // Each its own step, the typing first.
+    let labels = undo_labels(&s);
+    let n = labels.len();
+    assert_eq!(labels[n - 4], "Typing", "{labels:?}");
+    assert_eq!(labels[n - 2], "Typing", "{labels:?}");
+}
+
+/// #1881: a dialog previewing a transformation while the type is being typed (Object › Transform
+/// with Preview) starts from the typed text, and keeps it when it commits.
+#[test]
+fn a_previewed_transform_while_typing_keeps_the_typing() {
+    let mut s = session();
+    let v = ViewInfo::default();
+    let id = text(&mut s, "Hello");
+    s.select_tool("type", v).unwrap();
+    let b = s.doc().unwrap().doc.bounds_of(&[id], false).unwrap();
+    click(&mut s, b.x1 - 1.0, b.center().y);
+    s.tool_text(" world", v).unwrap();
+    s.begin_interaction("Move").unwrap();
+    s.preview("object.setBounds", &json!({"x": 400, "reference": 0})).unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "Hello world", "the preview starts from the typed text");
+    s.commit_interaction().unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "Hello world");
+    assert!((left(&s, id) - 400.0).abs() < 1e-6);
+    // Typing on starts a new session from the moved text.
+    s.tool_text("!", v).unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "Hello world!");
+    assert!((left(&s, id) - 400.0).abs() < 1e-6);
+}
+
+/// #1950: a colour previewed while typing (the Color Picker, a Color panel slider) colours the
+/// typed text: its interaction used to join the typing session and preview from the document
+/// before the typing, so the new type came back as its placeholder text.
+#[test]
+fn a_colour_previewed_while_typing_keeps_the_typing() {
+    let mut s = session();
+    s.prefs.placeholder_text = true;
+    let v = ViewInfo::default();
+    s.select_tool("type", v).unwrap();
+    click(&mut s, 50.0, 300.0);
+    let id = s.doc().unwrap().selection.objects[0];
+    s.tool_text("abc", v).unwrap();
+    s.begin_interaction("Fill Color").unwrap();
+    s.preview("paint.setFill", &json!({"color": "#00a000"})).unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "abc", "the preview starts from the typed text");
+    s.commit_interaction().unwrap();
+    let t = obj(&s, id);
+    assert_eq!(t.plain_text(), "abc");
+    assert!(t.runs.iter().all(|r| r.style.fill == Paint::solid(vectorcraft_color::Color::rgb8(0, 160, 0))), "{:?}", t.runs);
+    // The typing and the colour are a step each, and typing goes on after them.
+    let labels = undo_labels(&s);
+    assert_eq!(&labels[labels.len() - 2..], ["Typing", "Fill Color"]);
+    s.tool_text("d", v).unwrap();
+    assert_eq!(obj(&s, id).plain_text(), "abcd");
+}
+
+/// The red out port of selected overflowing area type is drawn with the Selection tool too, and
+/// not twice with the Type tool, which draws it itself (#2323).
+#[test]
+fn overflow_marker_shows_with_the_selection_tool() {
+    let mut s = session();
+    let v = ViewInfo::default();
+    let long = "Words that fill more than the frame holds. ".repeat(20);
+    let r = s.execute("text.create", &json!({"x": 50, "y": 50, "text": long, "size": 20, "area": {"width": 100, "height": 40}})).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.select_tool("selection", v).unwrap();
+    let red = |s: &mut Session| s.overlays(v).iter().filter(|o| matches!(o, vectorcraft_tools::Overlay::Path { color: [230, 30, 30], .. })).count();
+    assert_eq!(red(&mut s), 1, "the out port");
+    s.select_tool("type", v).unwrap();
+    assert_eq!(red(&mut s), 1, "the Type tool's own, not a second one");
+    s.execute("select.set", &json!({"ids": []})).unwrap();
+    s.select_tool("selection", v).unwrap();
+    assert_eq!(red(&mut s), 0, "nothing selected");
+}

@@ -103,6 +103,11 @@ impl PreviewMode {
     }
 }
 
+/// A saved preset's raster effects resolution, within 1 to 2400 ppi (72 when it isn't finite).
+fn de_ppi<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f64, D::Error> {
+    Ok(Some(f64::deserialize(d)?).filter(|v| v.is_finite()).unwrap_or(72.0).clamp(1.0, 2400.0))
+}
+
 /// Everything New Document sets: a preset (built-in, saved or recent) or `file.new`'s params.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -125,6 +130,8 @@ pub struct DocSettings {
     pub bleed: [f64; 4],
     pub background: Background,
     pub color_mode: ColorMode,
+    /// 1 to 2400 ppi (a saved preset's value outside that range is read as the nearer end).
+    #[serde(deserialize_with = "de_ppi")]
     pub raster_effects_ppi: f64,
     pub preview_mode: PreviewMode,
 }

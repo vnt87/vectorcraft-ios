@@ -7,7 +7,7 @@ use vectorcraft_color::Color;
 use vectorcraft_color::cms::{self, Cms, Model, ProfileKind};
 use vectorcraft_color::swatch::REGISTRATION;
 use vectorcraft_doc::inks::{Link, inks, plates, visit_node_colors};
-use vectorcraft_doc::overprint::multiply_overprints;
+use vectorcraft_doc::overprint::darken_overprints;
 use vectorcraft_doc::{ColorMode, Document, Node};
 
 use super::{DEFAULT_FREQUENCY, PrintInk, PrintSettings};
@@ -93,14 +93,14 @@ impl<'a> Separator<'a> {
     }
 
     /// The document as plate `plate`: art, symbols, pattern tiles and images in the grey of the
-    /// ink's coverage. Overprinting fills and strokes multiply, so where they have none of this
+    /// ink's coverage. Overprinting fills and strokes darken, so where they have none of this
     /// ink the plate below shows through instead of being knocked out.
     pub fn plate(&self, plate: &str) -> Document {
         let mut d = self.doc.clone();
         let discard_white = d.setup.discard_white_overprint;
         let nodes = d.layers.iter_mut().chain(d.symbols.iter_mut().map(|s| &mut s.art)).chain(d.patterns.iter_mut().flat_map(|p| p.art.iter_mut()));
         for n in nodes {
-            multiply_overprints(n, discard_white);
+            darken_overprints(n, discard_white);
             self.node(plate, Arc::make_mut(n));
         }
         for blob in d.images.values_mut() {

@@ -121,6 +121,23 @@ fn bug_huge_transform_makes_document_unloadable() {
     }
 }
 
+/// Distribute with a huge spacing from each of the three selected objects as the key object leaves
+/// a document that saves and opens again.
+#[test]
+fn distribute_with_a_huge_spacing_from_the_key_object() {
+    for key in 0..3 {
+        for p in [json!({"horizontal": "left", "spacing": 1e308}), json!({"vertical": "bottom", "spacing": -1e308})] {
+            let mut s = Fixture::Multi.session();
+            let id = s.doc().unwrap().selection.objects[key];
+            s.execute("select.key", &json!({"id": id.0})).unwrap();
+            if no_panic(s.execute("object.distribute", &p)).is_ok() {
+                check_session(&s).unwrap_or_else(|e| panic!("key {key}, {p}: {e}"));
+                vectorcraft_testkit::invariants::check_native_roundtrip(&s.doc().unwrap().doc).unwrap_or_else(|e| panic!("key {key}, {p}: {e}"));
+            }
+        }
+    }
+}
+
 #[test]
 fn bug_artboard_huge_props_break_svg() {
     for key in ["x", "y", "width", "height"] {
@@ -172,6 +189,11 @@ fn every_command_with_junk_params() {
 fn structured_junk() {
     let cases: Vec<(&str, Value)> = vec![
         ("select.set", json!({"ids": [0, u64::MAX, -1, "x", null, 1.5]})),
+        ("document.export", json!({"format": "png", "rect": [1e308, -1e308, 1e308, 1e308]})),
+        ("document.export", json!({"format": "png", "rect": [0, 0, 1e300, 1e300], "scale": 64})),
+        ("document.export", json!({"format": "tiff", "rect": [null, "x", -1, 0.0000001], "useArtboards": true})),
+        ("document.export", json!({"format": "bmp", "rect": {"x": 1}, "artboard": 3})),
+        ("document.export", json!({"format": "svg", "rect": [0, 0, 10, 10]})),
         ("select.add", json!({"ids": [[1], {"a": 1}]})),
         ("select.anchors", json!({"id": 2, "anchors": [[99, 99], [-1, 0], ["a", "b"]], "mode": "set"})),
         ("select.anchorsMany", json!({"items": [{"id": 2, "anchors": [[0, 1000]]}, null, 5]})),
@@ -305,6 +327,7 @@ fn structured_junk() {
         ("effect.apply", json!({"effect": "pixelate.crystallize", "params": {"cellSize": -1e308}})),
         ("effect.apply", json!({"effect": "pixelate.mezzotint", "params": {"type": 5}})),
         ("effect.apply", json!({"effect": "pixelate.pointillize", "params": {"cellSize": "NaN"}})),
+        ("effect.apply", json!({"effect": "sketch.halftonePattern", "params": {"size": -1e308, "contrast": "NaN", "patternType": 3}})),
         ("effect.apply", json!({"effect": "texture.craquelure", "params": {"crackSpacing": -1e308, "crackDepth": "NaN", "crackBrightness": 1e308}})),
         ("effect.apply", json!({"effect": "texture.grain", "params": {"intensity": 1e308, "contrast": [1], "grainType": 7}})),
         ("effect.apply", json!({"effect": "texture.mosaicTiles", "params": {"tileSize": "1e999", "groutWidth": -1, "lightenGrout": null}})),
@@ -346,6 +369,8 @@ fn structured_junk() {
         ("object.distributeSpacing", json!({"axis": "vertical", "spacing": 0})),
         ("object.align", json!({"horizontal": "center", "vertical": "center", "to": "artboard", "bounds": "preview"})),
         ("object.distribute", json!({"vertical": "center", "bounds": "geometric"})),
+        ("object.distribute", json!({"horizontal": "right", "to": "artboard", "artboard": u64::MAX, "bounds": "preview"})),
+        ("object.distributeSpacing", json!({"axis": "vertical", "to": "artboard", "artboard": -1, "spacing": null})),
         ("artboard.setProps", json!({"index": 0, "width": -1, "height": 0})),
         ("artboard.setProps", json!({"index": 0, "width": 1e300, "height": 1e-300, "scaleArt": true, "strokes": true, "corners": true})),
         ("artboard.setProps", json!({"index": 0, "x": -1e308, "width": 0, "height": 1, "scaleArt": true, "patterns": true})),

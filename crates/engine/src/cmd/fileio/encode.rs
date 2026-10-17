@@ -307,6 +307,32 @@ fn use_artboards(p: &Value) -> Result<Option<bool>> {
     }
 }
 
+/// The `rect` param of a raster export: `[x, y, width, height]` in points, y down. `None` when
+/// absent; an error when it is not four finite numbers with a positive size, when the format isn't
+/// a raster one, or when it comes with an artboard choice (`rect` is the area, so those would
+/// contradict it). The image size limits are checked with the scale, as for an artboard.
+fn page_rect(f: &Format, p: &Value) -> Result<Option<Rect>> {
+    let v = match p.get("rect") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(v) => v,
+    };
+    if !f.raster {
+        return Err(bad(C, format!("rect applies to raster formats, not {}", f.label)));
+    }
+    if let Some(k) = ARTBOARD_PARAMS.iter().chain(["useArtboards"].iter()).find(|k| p.get(**k).is_some_and(|v| !v.is_null())) {
+        return Err(bad(C, format!("rect and {k} contradict each other: give the area or the artboards")));
+    }
+    let nums: Option<Vec<f64>> = v.as_array().filter(|a| a.len() == 4).and_then(|a| a.iter().map(Value::as_f64).collect());
+    let Some(&[x, y, w, h]) = nums.as_deref() else {
+        return Err(bad(C, "rect is [x, y, width, height] in points"));
+    };
+    let (x1, y1) = (x + w, y + h);
+    if !(x.is_finite() && y.is_finite() && w > 0.0 && h > 0.0 && x1.is_finite() && y1.is_finite()) {
+        return Err(bad(C, "rect needs finite numbers and a positive width and height"));
+    }
+    Ok(Some(Rect::new(x, y, x1, y1)))
+}
+
 /// A copy of `doc` with one artboard, `rect` (exports of the art's or the selection's bounds).
 pub(super) fn single_artboard(doc: &Document, rect: Rect, name: &str) -> Document {
     with_single_artboard(doc.clone(), rect, name)
@@ -408,6 +434,15 @@ fn encode_files(doc: &Document, f: &Format, p: &Value) -> Result<Encoded> {
     let n = doc.artboards.len();
     // SVG reads its own `useArtboards` (an SVG option).
     let use_artboards = if f.raster || matches!(f.id, "pdf" | "ai" | "dxf" | "emf" | "wmf") { use_artboards(p)? } else { None };
+    // `rect`: that area of the page, as if it were the only artboard (the document is not changed).
+    if let Some(rect) = page_rect(f, p)? {
+        let mut q = super::export::without_artboards(p);
+        if let Some(o) = q.as_object_mut() {
+            o.remove("rect");
+            o.remove("useArtboards");
+        }
+        return encode_files(&single_artboard(doc, rect, "Rect"), f, &q);
+    }
     if use_artboards == Some(false) {
         let bounds = vectorcraft_render::encode::art_bounds(doc).ok_or_else(|| bad(C, "nothing to export: the document has no visible art"))?;
         let mut q = super::export::without_artboards(p);
@@ -479,6 +514,9 @@ fn encode_files(doc: &Document, f: &Format, p: &Value) -> Result<Encoded> {
                 } else {
                     bytes
                 };
+                // PNG: say the colours are sRGB (what the renderer draws), unless `embedIcc` is false.
+                let bytes =
+                    if format == RasterFormat::Png && settings.jpeg.embed_icc { vectorcraft_render::encode::png::with_srgb(bytes) } else { bytes };
                 enc.files.push((Some(b), bytes));
             }
             if enc.files.is_empty() {

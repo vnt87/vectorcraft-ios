@@ -166,6 +166,20 @@ fn xml_attr_escape(s: &str) -> String {
     xml_escape(s).replace('\t', "&#9;").replace('\n', "&#10;").replace('\r', "&#13;")
 }
 
+/// Escape type for XML content. Characters XML 1.0 does not allow are dropped, except the line
+/// and page breaks (U+000B, U+000C) other apps paste, which become spaces.
+fn xml_text(s: &str) -> String {
+    let s: String = s
+        .chars()
+        .filter_map(|c| match c {
+            '\u{b}' | '\u{c}' => Some(' '),
+            c if valid_xml_value(c.encode_utf8(&mut [0; 4])) => Some(c),
+            _ => None,
+        })
+        .collect();
+    xml_escape(&s)
+}
+
 fn valid_xml_value(s: &str) -> bool {
     s.chars().all(|c| matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'))
 }
@@ -380,9 +394,12 @@ impl Reuse {
             }
         }
         match &n.kind {
-            NodeKind::Blend { .. } | NodeKind::Envelope { .. } | NodeKind::Mesh(_) | NodeKind::Repeat(_) | NodeKind::PlacedDocument(_) => {
-                (self.turns, self.scales) = (false, false)
-            }
+            NodeKind::Blend { .. }
+            | NodeKind::Envelope { .. }
+            | NodeKind::Mesh(_)
+            | NodeKind::Repeat(_)
+            | NodeKind::PlacedDocument(_)
+            | NodeKind::Intertwine { .. } => (self.turns, self.scales) = (false, false),
             NodeKind::SymbolInstance { symbol, .. } => {
                 if let Some(s) = doc.symbols.iter().find(|s| s.name == *symbol) {
                     self.scan(doc, &s.art, depth + 1);
@@ -1448,7 +1465,12 @@ impl Writer<'_> {
                 (self.xf, self.instance_xf) = saved;
             }
             // Live blends/envelopes/meshes export their evaluated (expanded) form.
-            NodeKind::Blend { .. } | NodeKind::Envelope { .. } | NodeKind::Mesh(_) | NodeKind::Repeat(_) | NodeKind::PlacedDocument(_) => {
+            NodeKind::Blend { .. }
+            | NodeKind::Envelope { .. }
+            | NodeKind::Mesh(_)
+            | NodeKind::Repeat(_)
+            | NodeKind::PlacedDocument(_)
+            | NodeKind::Intertwine { .. } => {
                 let g = vectorcraft_effects::expand_live_deep(Some(self.doc), n);
                 self.share_images(&g);
                 self.node_body(&g);
@@ -1567,7 +1589,8 @@ impl Writer<'_> {
     }
 
     /// Raster effects (drop shadow, glows, Gaussian blur, feather) as SVG filters: one `<g filter>`
-    /// per effect, the first effect innermost (the reference app's stacking order). Photoshop-style
+    /// per effect, the first effect innermost (the reference app's stacking order). A drop shadow
+    /// with Darkness darkens the screen colors, in a CMYK document too. Photoshop-style
     /// filters have no SVG equivalent: they are left out with a warning (exports from the app turn
     /// such objects into images first).
     fn filtered(&mut self, n: &Node) {
@@ -1614,6 +1637,15 @@ impl Writer<'_> {
                 format!("<feFlood flood-color=\"{}\" flood-opacity=\"{}\"/>", c.to_hex(), fmt_num(o as f64, 3))
             };
             let body = match f {
+                // Darkness: the object blurred and moved, each color channel times 1 − darkness.
+                RasterFx::DropShadow { opacity, dx, dy, blur, darkness: Some(darkness), .. } => format!(
+                    "<feGaussianBlur in=\"SourceGraphic\" stdDeviation=\"{}\"/><feOffset dx=\"{}\" dy=\"{}\"/><feComponentTransfer result=\"paint\"><feFuncR type=\"linear\" slope=\"{keep}\"/><feFuncG type=\"linear\" slope=\"{keep}\"/><feFuncB type=\"linear\" slope=\"{keep}\"/><feFuncA type=\"linear\" slope=\"{}\"/></feComponentTransfer><feMerge><feMergeNode in=\"paint\"/><feMergeNode in=\"SourceGraphic\"/></feMerge>",
+                    sd(*blur),
+                    self.num(*dx),
+                    self.num(*dy),
+                    fmt_num(*opacity as f64, 3),
+                    keep = fmt_num(1.0 - *darkness as f64, 3)
+                ),
                 RasterFx::DropShadow { opacity, dx, dy, blur, color, .. } => format!(
                     "<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"{}\"/><feOffset dx=\"{}\" dy=\"{}\" result=\"shadow\"/>{}<feComposite in2=\"shadow\" operator=\"in\" result=\"paint\"/><feMerge><feMergeNode in=\"paint\"/><feMergeNode in=\"SourceGraphic\"/></feMerge>",
                     sd(*blur),
@@ -1684,7 +1716,9 @@ impl Writer<'_> {
         let saved = std::mem::replace(&mut self.xf, to_user);
         let fill = self.paint(&st.fill, Some(bounds));
         p.push(("fill", fill));
-        if st.has_stroke() {
+        // An inside or outside stroke is drawn on the glyph outlines instead
+        // ([`Self::aligned_char_strokes`]): SVG strokes text centred only.
+        if st.has_stroke() && !aligned(st) {
             // Weight, cap, join, miter limit and dashes as for object strokes; a gradient spans
             // the text grown by half the weight, as on the canvas.
             let layer = st.stroke_layer();
@@ -1712,7 +1746,10 @@ impl Writer<'_> {
         let outlined = self.opts.outline_text || t.vertical || (inline && matches!(t.kind, TextKind::OnPath { .. }));
         let chars = |w: &mut Self, n: &Node| if outlined { w.text_outlines(n, t) } else { w.text(n, t) };
         let painted = n.appearance.items.iter().any(|i| i.visible() && !i.paint().is_none());
-        if !painted && !inline {
+        // Live type with an inside or outside character stroke writes that stroke apart from the
+        // text, in the group.
+        let apart = !outlined && t.runs.iter().any(|r| aligned(&r.style));
+        if !painted && !inline && !apart {
             return chars(self, n);
         }
         let id = self.id_attr(n);
@@ -1866,6 +1903,40 @@ impl Writer<'_> {
         }
         s.push_str("</text>");
         self.line(&s);
+        self.aligned_char_strokes(t);
+    }
+
+    /// The inside and outside character strokes of live type `t`, over its text (which goes
+    /// without them, see [`Self::char_props`]): each such run's stroke on its glyph outlines, drawn
+    /// twice as wide and clipped or masked to its side as aligned path strokes are
+    /// ([`Self::side_attr`]). The text stays live; only the stroke follows the outlines.
+    fn aligned_char_strokes(&mut self, t: &TextObject) {
+        if !t.runs.iter().any(|r| aligned(&r.style)) {
+            return;
+        }
+        let db = vectorcraft_text::FontDb::global();
+        let lay = vectorcraft_text::layout(db, t);
+        let bars = vectorcraft_text::decorations(&lay, db, t);
+        // The glyphs stay in text space; the text's transform joins the document's meanwhile.
+        let saved = self.xf;
+        self.xf = saved * t.xf;
+        for (i, run) in t.runs.iter().enumerate().filter(|(_, r)| aligned(&r.style)) {
+            let mut bp = BezPath::new();
+            for g in lay.glyphs.iter().filter(|g| g.run == i) {
+                bp.extend(g.outline.iter());
+            }
+            for (_, bar) in bars.iter().filter(|(r, _)| *r == i) {
+                bp.extend(bar.iter());
+            }
+            if bp.elements().is_empty() {
+                continue;
+            }
+            let pd = PathData::from_bezpath(&bp);
+            let ap = vectorcraft_doc::Appearance { items: vec![AppearanceItem::Stroke(run.style.stroke_layer())], ..Default::default() };
+            let d = self.path_d(&pd, self.xf);
+            self.shape(&Node::path(NodeId(u64::MAX), pd.clone(), ap), &d, &[&pd], FillRule::NonZero, Some(lay.bounds));
+        }
+        self.xf = saved;
     }
 
     /// One line of laid-out text starting at `start`. Default: a positioned `<tspan>` per segment
@@ -1905,7 +1976,7 @@ impl Writer<'_> {
             }
             let diff = run_diff(&base.props, self.char_props(st, base.space));
             attrs.push_str(&self.attrs(&diff));
-            let text = xml_escape(&seg.text);
+            let text = xml_text(&seg.text);
             if attrs.is_empty() && fewer {
                 s.push_str(&text);
             } else {
@@ -2010,11 +2081,17 @@ impl Writer<'_> {
         for run in &t.runs {
             let diff = run_diff(&base, self.char_props(&run.style, space));
             let a = self.attrs(&diff);
-            s.push_str(&format!("<tspan{a}>{}</tspan>", xml_escape(&run.text.replace('\n', " "))));
+            s.push_str(&format!("<tspan{a}>{}</tspan>", xml_text(&run.text.replace('\n', " "))));
         }
         s.push_str("</textPath></text>");
         self.line(&s);
+        self.aligned_char_strokes(t);
     }
+}
+
+/// Does a character style stroke inside or outside its glyphs (not centred)?
+fn aligned(st: &CharStyle) -> bool {
+    st.has_stroke() && st.stroke_align != StrokeAlign::Center
 }
 
 /// What the `<tspan>` of a run whose properties are `run` sets over its `<text>`'s `base`: the

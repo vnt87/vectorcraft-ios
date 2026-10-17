@@ -181,6 +181,10 @@ impl Color {
             _ => {}
         }
         let h = s.strip_prefix('#').unwrap_or(s);
+        // `from_str_radix` accepts a leading `+`, so check the digits first.
+        if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
         let p = |i: usize, n: usize| u8::from_str_radix(h.get(i..i + n)?, 16).ok();
         match h.len() {
             3 => Some(Color::rgb8(p(0, 1)? * 17, p(1, 1)? * 17, p(2, 1)? * 17)),
@@ -410,6 +414,14 @@ mod tests {
         assert_eq!(c.to_hex(), "#ff8000");
         assert_eq!(Color::from_hex("#fff").unwrap().to_hex(), "#ffffff");
         assert_eq!(Color::from_hex("zz"), None);
+    }
+
+    #[test]
+    fn hex_rejects_sign_characters() {
+        for bad in ["#+1+2+3", "+f+f+f", "#-1-2-3", "#+12+34+56", "#+f+f+f+f", "#12345+"] {
+            assert_eq!(Color::from_hex(bad), None, "{bad}");
+        }
+        assert_eq!(Color::from_hex("#123"), Color::from_hex("#112233"));
     }
 
     #[test]

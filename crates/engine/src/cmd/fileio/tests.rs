@@ -236,6 +236,36 @@ fn formats_query_lists_readers_writers_and_options() {
     assert_eq!(r["openExtensions"].as_array().unwrap().len(), OPEN_EXTS.len());
 }
 
+/// The format ids `command`'s params text lists for `format` (`a|b (default)|c (…)`, up to the
+/// first comma), sorted.
+fn listed_formats(command: &str) -> Vec<String> {
+    let params = crate::cmd::find_command(command).unwrap().params;
+    let (_, rest) = params.split_once("format?: ").unwrap_or_else(|| panic!("{command} lists no formats"));
+    let list = rest.split(',').next().unwrap_or_default();
+    let mut ids: Vec<String> = list.split('|').filter_map(|f| f.split_whitespace().next()).map(str::to_string).collect();
+    ids.sort();
+    ids
+}
+
+/// The params texts of the commands that take any writable format list exactly the formats each
+/// command writes (.ai among them).
+#[test]
+fn export_params_list_every_format_the_command_writes() {
+    let mut s = session(100.0, 80.0, 1);
+    s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 50, "height": 40})).unwrap();
+    s.execute("select.all", &json!({})).unwrap();
+    for command in ["document.serialize", "document.export", "document.exportSelection"] {
+        let mut refused = vec![];
+        let mut written: Vec<String> = FORMATS
+            .iter()
+            .filter(|f| s.execute(command, &json!({"format": f.id})).map_err(|e| refused.push(format!("{}: {e}", f.id))).is_ok())
+            .map(|f| f.id.to_string())
+            .collect();
+        written.sort();
+        assert_eq!(listed_formats(command), written, "{command}; refused: {refused:?}");
+    }
+}
+
 #[test]
 fn ranges_parse_one_based() {
     assert_eq!(parse_range("1-3, 5", 5).unwrap(), [0, 1, 2, 4]);
@@ -348,7 +378,9 @@ fn export_for_screens_one_page_per_pdf_unique_names() {
     let r = s.execute("document.exportForScreens", &json!({"range": "3", "formats": [{"format": "jpg", "scale": 0.5}]})).unwrap();
     assert_eq!(r["files"][0]["name"], "Artboard-3@0.5x.jpg");
     assert_eq!(image::load_from_memory(&b64(&r["files"][0])).unwrap().width(), 50);
-    assert!(s.execute("document.exportForScreens", &json!({"formats": [{"format": "vectorcraft"}]})).is_err());
+    // A native row: each artboard as a document of its own to edit.
+    let r = s.execute("document.exportForScreens", &json!({"range": "1", "formats": [{"format": "vectorcraft"}]})).unwrap();
+    assert!(r["files"][0]["name"].as_str().unwrap().ends_with(".vectorcraft"), "{r}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

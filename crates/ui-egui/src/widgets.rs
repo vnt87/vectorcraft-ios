@@ -1,4 +1,4 @@
-//! Shared widgets in Illustrator's panel style. Colours come from theme tokens.
+//! Shared widgets. Colours come from theme tokens.
 
 use egui::{Color32, CornerRadius, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
 use vectorcraft_color::{BlendMode, Color, Paint};
@@ -25,9 +25,9 @@ pub fn paint_icon_button(ui: &mut Ui, resp: Response, icon: &str, tip: &str, sel
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, CornerRadius::same(3), bg);
+    ui.painter().rect_filled(rect, CornerRadius::same(5), bg);
     let pad = (size * 0.2).round();
-    icons::paint(ui, icon, rect.shrink(pad), if selected { t.text } else { t.icon });
+    icons::paint(ui, icon, rect.shrink(pad), if selected { t.text_strong } else { t.icon });
     if !tip.is_empty() { resp.on_hover_text(tl!(tip)) } else { resp }
 }
 
@@ -36,13 +36,8 @@ pub fn flat_button(ui: &mut Ui, text: &str, width: f32) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 24.0), Sense::click());
     let rect = rect.shrink2(vec2(0.0, 0.5));
+    ui.painter().rect_filled(rect, CornerRadius::same(5), t.button);
     flat_fill(ui, rect, &resp);
-    ui.painter().rect_stroke(
-        rect,
-        CornerRadius::same(2),
-        Stroke::new(1.0, if resp.hovered() { t.text } else { t.button_border }),
-        StrokeKind::Inside,
-    );
     ui.painter().with_clip_rect(rect).text(rect.center(), egui::Align2::CENTER_CENTER, tl!(text), egui::FontId::proportional(12.5), t.text_strong);
     resp
 }
@@ -61,11 +56,10 @@ pub fn split_button(ui: &mut Ui, text: &str, width: f32) -> (Response, Response)
     let arrow_rect = Rect::from_min_max(pos2(split, rect.top()), rect.max);
     let main = ui.interact(main_rect, ui.id().with((text, "split")), Sense::click());
     let arrow = ui.interact(arrow_rect, ui.id().with((text, "split-arrow")), Sense::click());
+    ui.painter().rect_filled(rect, CornerRadius::same(5), t.button);
     flat_fill(ui, main_rect, &main);
     flat_fill(ui, arrow_rect, &arrow);
-    let border = if main.hovered() || arrow.hovered() { t.text } else { t.button_border };
-    ui.painter().rect_stroke(rect, CornerRadius::same(2), Stroke::new(1.0, border), StrokeKind::Inside);
-    ui.painter().vline(split, rect.y_range().shrink(4.0), Stroke::new(1.0, t.button_border));
+    ui.painter().vline(split, rect.y_range().shrink(5.0), Stroke::new(1.0, t.panel));
     ui.painter().with_clip_rect(main_rect).text(
         main_rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -81,34 +75,44 @@ pub fn split_button(ui: &mut Ui, text: &str, width: f32) -> (Response, Response)
 fn flat_fill(ui: &Ui, rect: Rect, resp: &Response) {
     let t = Tokens::get(ui.ctx());
     if resp.is_pointer_button_down_on() {
-        ui.painter().rect_filled(rect, CornerRadius::same(2), t.tool_active);
+        ui.painter().rect_filled(rect, CornerRadius::same(5), t.tool_active);
     } else if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(2), t.hover);
+        ui.painter().rect_filled(rect, CornerRadius::same(5), t.hover);
     }
 }
 
-/// Blue call-to-action pill (dialog OK/Create).
+/// The accent call-to-action button (dialog OK/Create).
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
+    primary_button_enabled(ui, text, true)
+}
+
+/// [`primary_button`], greyed out and not clickable unless `enabled`.
+pub fn primary_button_enabled(ui: &mut Ui, text: &str, enabled: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(tl!(text).to_string(), theme::semibold(12.5), Color32::WHITE);
+    let fg = if enabled { Color32::WHITE } else { t.text_disabled };
+    let galley = ui.painter().layout_no_wrap(tl!(text).to_string(), theme::semibold(12.5), fg);
     let w = galley.size().x + 32.0;
-    let (rect, resp) = ui.allocate_exact_size(vec2(w.max(72.0), 28.0), Sense::click());
-    let bg = if resp.hovered() { t.accent } else { t.accent_strong };
-    ui.painter().rect_filled(rect, CornerRadius::same(14), bg);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w.max(72.0), 28.0), if enabled { Sense::click() } else { Sense::hover() });
+    let bg = match (enabled, resp.hovered()) {
+        (false, _) => t.input,
+        (true, true) => t.accent,
+        (true, false) => t.accent_strong,
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
+    if !enabled {
+        ui.painter().rect_stroke(rect, CornerRadius::same(6), egui::Stroke::new(1.0, t.button_border), egui::StrokeKind::Inside);
+    }
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, fg);
     resp
 }
 
-/// Outlined secondary pill (dialog Cancel).
+/// The quiet secondary button (dialog Cancel).
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(tl!(text).to_string(), theme::semibold(12.5), t.text);
     let w = galley.size().x + 32.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(w.max(72.0), 28.0), Sense::click());
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(14), t.hover);
-    }
-    ui.painter().rect_stroke(rect, CornerRadius::same(14), Stroke::new(1.5, t.text_dim), StrokeKind::Inside);
+    ui.painter().rect_filled(rect, CornerRadius::same(6), if resp.hovered() { t.hover } else { t.button });
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, t.text);
     resp
 }
@@ -117,7 +121,7 @@ pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
 pub fn section_header(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(2.0);
-    ui.label(egui::RichText::new(tl!(text)).size(13.0).color(t.text));
+    ui.label(egui::RichText::new(tl!(text)).size(12.5).color(t.text_strong));
     ui.add_space(2.0);
 }
 
@@ -302,6 +306,36 @@ pub(crate) fn focus_field(ui: &Ui, id: egui::Id, text: &str) {
     ui.memory_mut(|m| m.request_focus(id));
 }
 
+/// The modifiers held with an Enter press among this frame's events, `None` without one, as when a
+/// field's editing ends with a click elsewhere.
+pub(crate) fn enter_modifiers(ui: &Ui) -> Option<egui::Modifiers> {
+    ui.input(|i| {
+        i.events.iter().find_map(|e| match e {
+            egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } => Some(*modifiers),
+            _ => None,
+        })
+    })
+}
+
+/// A [`num_field`] for a width or height (Transform panel, Properties panel, Control bar): Ctrl/Cmd+Enter
+/// also commits it and ends its editing, as Enter does, and [`enter_modifiers`] reports Command.
+pub fn size_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value: Option<f64>, unit: Unit, width: f32) -> Option<f64> {
+    use egui::{Event, Key};
+    // The text box does not end its editing on an Enter with Ctrl/Cmd: a plain Enter goes in right
+    // after it, so the box first takes the text typed before it in this frame.
+    let field = ui.id().with(&id);
+    if ui.memory(|m| m.has_focus(field)) {
+        ui.input_mut(|i| {
+            let cmd_enter = |e: &Event| matches!(e, Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if modifiers.command);
+            if let Some(at) = i.events.iter().position(cmd_enter) {
+                let enter = Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+                i.events.insert(at + 1, enter);
+            }
+        });
+    }
+    num_field(ui, id, value, unit, width)
+}
+
 /// Select all of `text` in text field `id`.
 fn select_all(ui: &Ui, id: egui::Id, text: &str) {
     let mut st = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
@@ -311,25 +345,43 @@ fn select_all(ui: &Ui, id: egui::Id, text: &str) {
 }
 
 /// Numeric fields select the whole text on keyboard focus, a completed focus click or a
-/// double-click. A pointer press keeps its caret so dragging selects from the pressed position.
+/// double-click. A pointer press keeps its caret so dragging selects from the pressed position,
+/// and a short drag the toolkit still counts as a click keeps it too (#1326): only a tap
+/// releases into select-all.
 fn select_all_on_focus(ui: &Ui, resp: &Response, text: &str) {
     let pending = resp.id.with("select-all-on-focus-click");
-    let (pressed, released) =
-        ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Primary), i.pointer.button_released(egui::PointerButton::Primary)));
+    let press_pos = resp.id.with("select-all-on-focus-press");
+    let (pressed, released, at_press) = ui.input(|i| {
+        (i.pointer.button_pressed(egui::PointerButton::Primary), i.pointer.button_released(egui::PointerButton::Primary), i.pointer.interact_pos())
+    });
     if resp.gained_focus() {
         ui.data_mut(|d| {
             if pressed {
                 d.insert_temp(pending, true);
+                if let Some(p) = at_press {
+                    d.insert_temp(press_pos, p);
+                }
             } else {
                 d.remove_temp::<bool>(pending);
+                d.remove_temp::<egui::Pos2>(press_pos);
             }
         });
     }
     let clicked_focus = released && ui.data_mut(|d| d.remove_temp::<bool>(pending)).unwrap_or(false) && resp.clicked_by(egui::PointerButton::Primary);
+    // A press released a few points away is a short drag, not a tap. egui still reports a
+    // click, and a release inside one character leaves no text selection, so select-all on
+    // release would replace the drag the user just made (#1326).
+    let dragged = clicked_focus
+        && ui
+            .data_mut(|d| d.remove_temp::<egui::Pos2>(press_pos))
+            .is_some_and(|p0| ui.input(|i| i.pointer.interact_pos()).is_some_and(|p1| (p1 - p0).length() > 3.0));
     if resp.lost_focus() {
-        ui.data_mut(|d| d.remove_temp::<bool>(pending));
+        ui.data_mut(|d| {
+            d.remove_temp::<bool>(pending);
+            d.remove_temp::<egui::Pos2>(press_pos);
+        });
     }
-    if !(resp.gained_focus() && !pressed || resp.double_clicked() || clicked_focus) {
+    if !(resp.gained_focus() && !pressed || resp.double_clicked() || clicked_focus && !dragged) {
         return;
     }
     if let Some(st) = egui::TextEdit::load_state(ui.ctx(), resp.id) {
@@ -379,7 +431,7 @@ fn recessed_text(ui: &mut Ui, id: egui::Id, shown: &str, width: f32, rows: usize
         .allocate_ui_with_layout(vec2(width, height), layout, |ui| {
             ui.set_min_size(vec2(width, height));
             let rect = ui.max_rect();
-            ui.painter().rect(rect, 2.0, t.input, Stroke::new(1.0, if editing { t.accent } else { t.input_border }), StrokeKind::Inside);
+            ui.painter().rect(rect, 5.0, t.input, Stroke::new(1.0, if editing { t.accent } else { t.input_border }), StrokeKind::Inside);
             let margin = egui::Margin { left: 7, right: 7, top: if rows > 1 { 4 } else { 0 }, bottom: 0 };
             let resp = egui::Frame::NONE
                 .inner_margin(margin)
@@ -502,7 +554,7 @@ pub fn paint_chip(ui: &Ui, rect: Rect, paint: &Paint) {
             let [r, g, b, _] = color.to_rgba8(1.0);
             p.rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
         }
-        Paint::Gradient(gp) => gradient_chip(ui, rect, &gp.gradient),
+        Paint::Gradient(gp) => gradient_chip(ui, rect, gp),
         Paint::Pattern { .. } => {
             p.rect_filled(rect, 0.0, Color32::from_gray(200));
             for i in 0..4 {
@@ -513,32 +565,68 @@ pub fn paint_chip(ui: &Ui, rect: Rect, paint: &Paint) {
     }
 }
 
-/// Draw a gradient preview into `rect` (linear left to right; radial from the centre).
-pub fn gradient_chip(ui: &Ui, rect: Rect, gradient: &vectorcraft_color::Gradient) {
-    let p = ui.painter();
-    let radial = gradient.kind == vectorcraft_color::GradientKind::Radial;
-    if radial {
-        // Outer colour fills the corners beyond the largest circle.
-        let (c, _) = gradient.sample(1.0);
-        let [r, g, b, _] = c.to_rgba8(1.0);
-        p.rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
+/// Draw a gradient preview into `rect`, laid out as the gradient would be on an object of that
+/// shape: linear along its angle, radial from the centre, freeform from its colour points.
+pub fn gradient_chip(ui: &Ui, rect: Rect, gradient: &vectorcraft_color::GradientPaint) {
+    if !(rect.width() > 0.0 && rect.height() > 0.0) {
+        return;
     }
-    let n = 24;
-    let w = rect.width() / n as f32;
-    for i in 0..n {
-        let tt = (i as f32 + 0.5) / n as f32;
-        if radial {
-            let (c, _) = gradient.sample(1.0 - tt);
-            let [r, g, b, _] = c.to_rgba8(1.0);
-            let s = rect.width().min(rect.height()) * tt / 2.0;
-            p.circle_filled(rect.center(), s.max(0.5), Color32::from_rgb(r, g, b));
-        } else {
-            let (c, _) = gradient.sample(tt);
-            let [r, g, b, _] = c.to_rgba8(1.0);
-            let rr = Rect::from_min_size(pos2(rect.left() + i as f32 * w, rect.top()), vec2(w + 0.5, rect.height()));
-            p.rect_filled(rr, 0.0, Color32::from_rgb(r, g, b));
+    // Freeform sampling is costly per spot, so it gets a coarse grid (the mesh interpolates).
+    let freeform = gradient.gradient.kind == vectorcraft_color::GradientKind::Freeform;
+    let max = if freeform { 16 } else { 64 };
+    let cols = ((rect.width() / 3.0).ceil() as usize).clamp(1, max);
+    let rows = ((rect.height() / 3.0).ceil() as usize).clamp(1, max);
+    let colors = gradient_chip_colors(gradient, rect.width(), rect.height(), cols, rows);
+    let mut mesh = egui::Mesh::default();
+    for (k, color) in colors.into_iter().enumerate() {
+        let (i, j) = (k % (cols + 1), k / (cols + 1));
+        let at = pos2(rect.left() + rect.width() * i as f32 / cols as f32, rect.top() + rect.height() * j as f32 / rows as f32);
+        mesh.colored_vertex(at, color);
+    }
+    for j in 0..rows as u32 {
+        for i in 0..cols as u32 {
+            let v = j * (cols as u32 + 1) + i;
+            mesh.add_triangle(v, v + 1, v + cols as u32 + 1);
+            mesh.add_triangle(v + 1, v + cols as u32 + 2, v + cols as u32 + 1);
         }
     }
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
+/// The colours at the `(cols + 1) x (rows + 1)` grid points (row by row) of a `width` x `height`
+/// chip showing `gp` as it would look on an object of that size.
+fn gradient_chip_colors(gp: &vectorcraft_color::GradientPaint, width: f32, height: f32, cols: usize, rows: usize) -> Vec<Color32> {
+    use vectorcraft_color::{GradientGeom, GradientKind};
+    let b = vectorcraft_geom::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64);
+    let rgb = |c: vectorcraft_color::Color| {
+        let [r, g, b, _] = c.to_rgba8(1.0);
+        Color32::from_rgb(r, g, b)
+    };
+    let at = |k: usize| {
+        let (i, j) = (k % (cols + 1), k / (cols + 1));
+        vectorcraft_geom::kurbo::Point::new(b.width() * i as f64 / cols as f64, b.height() * j as f64 / rows as f64)
+    };
+    let n = (cols + 1) * (rows + 1);
+    if gp.gradient.kind == GradientKind::Freeform {
+        let Some(painted) = vectorcraft_color::freeform::painted_box(b) else { return vec![Color32::TRANSPARENT; n] };
+        let field = gp.freeform_on(painted).field(vectorcraft_color::freeform::spread_scale(painted));
+        return (0..n)
+            .map(|k| {
+                let ([r, g, b], _) = field.sample(at(k));
+                let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                Color32::from_rgb(q(r), q(g), q(b))
+            })
+            .collect();
+    }
+    // A placed gradient keeps its direction; a fresh one is fitted to the chip at its angle.
+    let angle = gp.geom.map_or(gp.angle, |g| g.angle_deg());
+    let geom = GradientGeom::fit(gp.gradient.kind, b, if angle.is_finite() { angle } else { 0.0 });
+    (0..n)
+        .map(|k| {
+            let t = geom.param_at(gp.gradient.kind, at(k)).clamp(0.0, 1.0) as f32;
+            rgb(gp.gradient.sample(t).0)
+        })
+        .collect()
 }
 
 /// A Fill chip of `paint` into `rect` or, with `ring`, a Stroke chip: a frame `ring` wide round a
@@ -713,13 +801,19 @@ pub(crate) fn combo<R>(
             if searchable {
                 return searchable_combo(ui, ui.id().with(id), current, width - 4.0, list);
             }
-            egui::ComboBox::from_id_salt(ui.id().with(id))
+            let id = ui.id().with(id);
+            let button_id = ui.make_persistent_id(egui::IdSalt::new(id));
+            let enter_for_combo = ui.memory(|m| m.has_focus(button_id)) || egui::ComboBox::is_open(ui.ctx(), button_id);
+            let response = egui::ComboBox::from_id_salt(id)
                 .selected_text(egui::RichText::new(current).size(12.0))
                 .width(width - 4.0)
                 .height(ui.spacing().combo_height)
-                .show_ui(ui, list)
-                .inner
-                .flatten()
+                .show_ui(ui, list);
+            // The button or open list handles Enter before the modal can accept it.
+            if enter_for_combo {
+                ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            }
+            response.inner.flatten()
         })
         .inner
 }
@@ -809,17 +903,39 @@ pub fn popover<R>(resp: &Response, toggle: bool, content: impl FnOnce(&mut Ui) -
     inner
 }
 
-/// The body of a menu or popup list: as tall as its items up to the bottom of the window, and
-/// scrolling only past that, so long menus (Window, Effect, a panel's menu) stay reachable on
-/// small windows.
-pub fn menu_scroll<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
-    // Room left below the popup's first item, less the popup frame and a small gap.
+/// Records where the bottom bars (status and hint bars) start this frame, so menus can stop above
+/// them (#2086). Without bars it is the bottom of the window.
+pub fn set_menu_floor(ctx: &egui::Context, y: f32) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("menu_floor"), y));
+}
+
+/// The height a menu list may take: from `top` down to `floor` less a small gap, at least 120 pt.
+pub fn menu_room(floor: f32, top: f32) -> f32 {
     const BOTTOM_GAP: f32 = 12.0;
     const MIN_HEIGHT: f32 = 120.0;
-    let room = (ui.ctx().content_rect().bottom() - ui.next_widget_position().y - BOTTOM_GAP).max(MIN_HEIGHT);
-    // The minimum lets the list grow past a popup's default 400 pt size; it still shrinks to
-    // its items when they need less.
-    egui::ScrollArea::vertical().max_height(room).min_scrolled_height(room).show(ui, add_contents).inner
+    (floor - top - BOTTOM_GAP).max(MIN_HEIGHT)
+}
+
+/// The scroll bar of a menu's list: slim, in a column of its own beside the items, so it never
+/// covers what sits at their right end (shortcuts, submenu arrows, a font's favourite star).
+pub fn list_scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle { bar_width: 6.0, bar_inner_margin: 2.0, ..egui::style::ScrollStyle::solid() }
+}
+
+/// The body of a menu or popup list: as tall as its items up to the bottom bars of the window, and
+/// scrolling only past that, so long menus (Window, Effect, a panel's menu) stay reachable on
+/// small windows. Its scroll bar has a column of its own, so it never covers the shortcuts or the
+/// submenu arrows (#2086).
+pub fn menu_scroll<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let floor = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("menu_floor"))).unwrap_or_else(|| ui.ctx().content_rect().bottom());
+    let room = menu_room(floor, ui.next_widget_position().y);
+    ui.scope(|ui| {
+        ui.spacing_mut().scroll = list_scroll_style();
+        // The minimum lets the list grow past a popup's default 400 pt size; it still shrinks to
+        // its items when they need less.
+        egui::ScrollArea::vertical().max_height(room).min_scrolled_height(room).show(ui, add_contents).inner
+    })
+    .inner
 }
 
 /// A column of tool or panel buttons (the toolbar, the dock's icon column) that scrolls when the
@@ -1410,19 +1526,27 @@ pub fn channel_slider(
 }
 
 /// A hex colour field (`E67828`, no `#`) after a `#` label. Returns the text on commit when it
-/// changed.
+/// was typed into the field and differs from `hex`.
 pub fn hex_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, hex: &str) -> Option<String> {
     let t = Tokens::get(ui.ctx());
     ui.label(egui::RichText::new("#").size(15.0).color(t.text));
     let id = ui.id().with(id);
     let editing = ui.memory(|m| m.has_focus(id));
-    let mut buf: String = if editing { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| hex.to_string()) } else { hex.to_string() };
+    // Until the user types into it, the field shows `hex` as it is now, also while it has the
+    // focus. Tab can give it the focus in the frame another field commits an edit, before the edit
+    // changes `hex`; the text from before that edit is not committed when the focus moves on
+    // (#1692).
+    let edited_id = id.with("edited");
+    let edited = editing && ui.data_mut(|d| d.get_temp::<bool>(edited_id)).unwrap_or(false);
+    let mut buf: String = if edited { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| hex.to_string()) } else { hex.to_string() };
     let resp = egui::Frame::NONE
         .fill(t.input)
         .stroke(Stroke::new(1.0, if editing { t.accent } else { t.input_border }))
-        .corner_radius(2)
+        .corner_radius(5)
         .inner_margin(egui::Margin::symmetric(6, 4))
         .show(ui, |ui| {
+            // As tall as the other fields (26 points with the margin), whatever the font's line height.
+            ui.set_height(18.0);
             ui.add(
                 egui::TextEdit::singleline(&mut buf)
                     .id(id)
@@ -1435,7 +1559,11 @@ pub fn hex_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, hex: &
         })
         .inner;
     let commit = resp.lost_focus() && buf != hex;
-    ui.data_mut(|d| d.insert_temp(id, buf.clone()));
+    let focused = ui.memory(|m| m.has_focus(id));
+    ui.data_mut(|d| {
+        d.insert_temp(id, buf.clone());
+        d.insert_temp(edited_id, (edited || resp.changed()) && focused);
+    });
     commit.then_some(buf)
 }
 
@@ -1498,9 +1626,10 @@ pub fn menu_item(ui: &mut Ui, label: &str, enabled: bool, checked: bool) -> bool
 }
 
 /// [`menu_item`] for a name that is user or file data (a library, a recent URL), never translated.
+/// Like the menu bar's items, the row lights up under the pointer.
 pub fn menu_item_name(ui: &mut Ui, label: &str, enabled: bool, checked: bool) -> bool {
     let text = if checked { format!("✓ {label}") } else { format!("   {label}") };
-    ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(text).size(12.5)).frame(false)).clicked()
+    ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(text).size(12.5)).frame_when_inactive(false)).clicked()
 }
 
 /// A number field that may be empty (Stroke dash/gap): `value` (points) shows in `unit` without
@@ -1511,7 +1640,16 @@ pub fn opt_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value:
     let id = ui.id().with(id);
     let shown = value.map(|v| unit.number(v)).unwrap_or_default();
     let editing = ui.memory(|m| m.has_focus(id));
-    let mut buf: String = if editing { ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| shown.clone()) } else { shown.clone() };
+    // As in `hex_field`: until the user types into it, the field shows `shown` as it is now
+    // (#1692). When `shown` changes while the field has the focus and nothing has been typed into
+    // it, all of the new text is selected, as on keyboard focus.
+    let edited_id = id.with("edited");
+    let edited = editing && ui.data_mut(|d| d.get_temp::<bool>(edited_id)).unwrap_or(false);
+    let before = ui.data_mut(|d| d.get_temp::<String>(id));
+    let mut buf: String = if edited { before.clone().unwrap_or_else(|| shown.clone()) } else { shown.clone() };
+    if editing && !edited && before.is_some_and(|b| b != buf) {
+        select_all(ui, id, &buf);
+    }
     let enabled = ui.is_enabled();
     let framed = egui::Frame::NONE
         .fill(t.input)
@@ -1533,7 +1671,11 @@ pub fn opt_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value:
     // ↑/↓ and the wheel step a value (an empty field stays empty); a drag on its label scrubs it.
     let stepped = step_value(ui, &resp, &mut buf, |b| Some(unit.from_pt(unit.parse(b)?)), |v| unit.number(unit.to_pt(v)));
     let scrubbed = scrub::field(ui, id, framed.response.rect, &buf, value.map(|v| unit.from_pt(v)), STEP_DECIMALS);
-    ui.data_mut(|d| d.insert_temp(id, buf.clone()));
+    let focused = ui.memory(|m| m.has_focus(id));
+    ui.data_mut(|d| {
+        d.insert_temp(id, buf.clone());
+        d.insert_temp(edited_id, (edited || resp.changed()) && focused);
+    });
     if resp.lost_focus() && buf != shown {
         let s = buf.trim();
         if s.is_empty() { Some(None) } else { typed_unit(ui.ctx(), unit).parse(s).map(Some) }
@@ -1917,5 +2059,55 @@ mod spinner_modifier_tests {
         assert_eq!(spinner_step(14.0, 1.0, 0.0, true, egui::Modifiers::NONE), 15.0);
         assert_eq!(spinner_step(14.0, 1.0, 0.0, false, egui::Modifiers::COMMAND), 13.9);
         assert_eq!(spinner_step(0.0, 1.0, 0.0, false, egui::Modifiers::SHIFT), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod menu_room_tests {
+    use super::*;
+
+    #[test]
+    fn menu_stops_above_the_bottom_bars() {
+        // Window 1000 pt tall, bars start at 948: a menu opening at y = 100 gets 836 pt, not 888.
+        assert_eq!(menu_room(948.0, 100.0), 836.0);
+    }
+
+    #[test]
+    fn menu_keeps_a_minimum_height() {
+        assert_eq!(menu_room(300.0, 290.0), 120.0);
+    }
+}
+
+#[cfg(test)]
+mod gradient_chip_tests {
+    use super::*;
+    use vectorcraft_color::{Gradient, GradientKind, GradientPaint};
+
+    fn paint(kind: GradientKind, angle: f64) -> GradientPaint {
+        let mut gp = GradientPaint::new(Gradient { kind, ..Gradient::default() });
+        gp.angle = angle;
+        gp
+    }
+
+    #[test]
+    fn linear_chip_follows_the_angle() {
+        // 5 x 5 grid points on a 20 x 20 chip; White (start) to Black (end).
+        let at = |colors: &[Color32], i: usize, j: usize| colors[j * 5 + i];
+        let side = gradient_chip_colors(&paint(GradientKind::Linear, 0.0), 20.0, 20.0, 4, 4);
+        assert_eq!(at(&side, 0, 2), Color32::WHITE);
+        assert_eq!(at(&side, 4, 2), Color32::BLACK);
+        assert_eq!(at(&side, 2, 0), at(&side, 2, 4));
+        // 90 degrees runs bottom to top: constant along rows, white at the bottom.
+        let up = gradient_chip_colors(&paint(GradientKind::Linear, 90.0), 20.0, 20.0, 4, 4);
+        assert_eq!(at(&up, 0, 4), Color32::WHITE);
+        assert_eq!(at(&up, 0, 0), Color32::BLACK);
+        assert_eq!(at(&up, 0, 2), at(&up, 4, 2));
+    }
+
+    #[test]
+    fn radial_chip_runs_from_the_centre_out() {
+        let colors = gradient_chip_colors(&paint(GradientKind::Radial, 0.0), 20.0, 20.0, 4, 4);
+        assert_eq!(colors[2 * 5 + 2], Color32::WHITE);
+        assert_eq!(colors[0], Color32::BLACK);
     }
 }

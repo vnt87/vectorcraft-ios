@@ -7,10 +7,18 @@ use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_vectorcraft-cli");
 
+/// Returns the path of `name` in `vectorcraft-cli-test-<pid>` in the temp folder. The first call removes
+/// that folder and creates it again empty.
 fn tmp(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("vectorcraft-cli-test-{}", std::process::id()));
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| empty_dir(std::env::temp_dir().join(format!("vectorcraft-cli-test-{}", std::process::id())))).join(name)
+}
+
+/// Removes `dir` and everything in it, creates it again empty and returns it.
+fn empty_dir(dir: std::path::PathBuf) -> std::path::PathBuf {
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir.join(name)
+    dir
 }
 
 #[test]
@@ -87,7 +95,20 @@ fn mcp_headless_over_stdio() {
 /// server starts, and the process then reads and writes only inside its roots.
 #[test]
 fn mcp_automation_roots() {
-    let base = tmp("roots");
+    automation_roots(&tmp("roots"));
+}
+
+/// A run that has the process id of an earlier run finds that run's files and links in its folder.
+/// `empty_dir`, which `tmp` uses, removes them, so the run can make them again instead of failing
+/// with "File exists".
+#[test]
+fn mcp_automation_roots_in_a_folder_an_earlier_run_left() {
+    let dir = tmp("earlier-run");
+    automation_roots(&dir.join("roots"));
+    automation_roots(&empty_dir(dir).join("roots"));
+}
+
+fn automation_roots(base: &std::path::Path) {
     for d in ["in", "out", "outside"] {
         std::fs::create_dir_all(base.join(d)).unwrap();
     }

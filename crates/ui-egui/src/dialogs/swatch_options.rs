@@ -76,7 +76,7 @@ pub fn open(app: &mut VectorcraftApp, name: &str) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Paint::Gradient(g) => {
-            let fields = json!({"__swatch": name, "name": name, "__gradient": g.gradient, "preview": true});
+            let fields = json!({"__swatch": name, "name": name, "__gradient": g, "preview": true});
             app.ui.dialog = Some(Dialog::new(KIND, fields));
             Ok(Value::Null)
         }
@@ -105,7 +105,7 @@ fn edit_params(d: &Dialog) -> Value {
 }
 
 fn body(app: &mut VectorcraftApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
-    let changed = match d.fields.get("__gradient").and_then(|g| serde_json::from_value::<vectorcraft_color::Gradient>(g.clone()).ok()) {
+    let changed = match d.fields.get("__gradient").and_then(|g| serde_json::from_value::<vectorcraft_color::GradientPaint>(g.clone()).ok()) {
         Some(g) => {
             let changed = grid(ui, |ui| name_row(ui, d));
             ui.add_space(6.0);
@@ -252,7 +252,11 @@ fn hex_field(ui: &mut egui::Ui, hex: &str) -> Option<Color> {
     let t = Tokens::get(ui.ctx());
     let id = ui.id().with("swatch-hex");
     let editing = ui.memory(|m| m.has_focus(id));
-    let mut buf: String = if editing { ui.data_mut(|m| m.get_temp::<String>(id)).unwrap_or_else(|| hex.to_string()) } else { hex.to_string() };
+    // As in `widgets::hex_field`: until the user types into it, the field shows `hex` as it is now
+    // (#1692).
+    let edited_id = id.with("edited");
+    let edited = editing && ui.data_mut(|m| m.get_temp::<bool>(edited_id)).unwrap_or(false);
+    let mut buf: String = if edited { ui.data_mut(|m| m.get_temp::<String>(id)).unwrap_or_else(|| hex.to_string()) } else { hex.to_string() };
     let resp = egui::Frame::NONE
         .fill(t.input)
         .stroke(egui::Stroke::new(1.0, if editing { t.accent } else { t.input_border }))
@@ -263,7 +267,11 @@ fn hex_field(ui: &mut egui::Ui, hex: &str) -> Option<Color> {
             ui.add(egui::TextEdit::singleline(&mut buf).id(id).frame(egui::Frame::NONE).desired_width(70.0).char_limit(7))
         })
         .inner;
-    ui.data_mut(|m| m.insert_temp(id, buf.clone()));
+    let focused = ui.memory(|m| m.has_focus(id));
+    ui.data_mut(|m| {
+        m.insert_temp(id, buf.clone());
+        m.insert_temp(edited_id, (edited || resp.changed()) && focused);
+    });
     (resp.lost_focus() && buf != hex).then(|| parse_hex(&buf)).flatten()
 }
 

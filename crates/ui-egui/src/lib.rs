@@ -48,6 +48,7 @@ pub mod prefs_dialog;
 pub mod print;
 pub mod recovery;
 pub mod render_worker;
+pub mod screen_color;
 mod scrub;
 pub mod shortcut_editor;
 pub mod shortcuts;
@@ -57,7 +58,7 @@ pub mod theme;
 pub mod thumb_worker;
 pub mod titlebar;
 pub mod toolbar;
-mod touch;
+pub mod touch;
 mod ui_fonts;
 pub mod unsaved;
 pub mod widgets;
@@ -85,6 +86,8 @@ mod tests_docsetup;
 mod tests_font_menu;
 #[cfg(test)]
 mod tests_fonts;
+#[cfg(test)]
+mod tests_guide_escape;
 #[cfg(test)]
 mod tests_home;
 #[cfg(test)]
@@ -123,6 +126,8 @@ mod tests_recolor;
 mod tests_recovery;
 #[cfg(test)]
 mod tests_removeanchors;
+#[cfg(test)]
+mod tests_rotateview;
 #[cfg(test)]
 mod tests_ruler_origin;
 #[cfg(test)]
@@ -249,6 +254,10 @@ pub struct Services {
     pub open_file: Option<RevealFn>,
     /// Show a folder picker; returns its path (desktop: Relink to Folder, Package).
     pub pick_folder: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Show the system's color sampler, which picks a color anywhere on the screen (macOS, and
+    /// browsers with an EyeDropper): Sample Color from Screen ([`screen_color`]). Without it that
+    /// command answers with an error and the Color Picker's eyedropper button is gray.
+    pub screen_color: Option<screen_color::StartSampler>,
     /// Where Data Recovery keeps its copies when not in a folder (the web's browser storage;
     /// tests): installed into the session ([`vectorcraft_engine::cmd::recovery`]).
     pub recovery_store: Option<std::sync::Arc<dyn vectorcraft_engine::cmd::recovery::RecoveryStore>>,
@@ -273,6 +282,10 @@ pub struct Services {
     /// The window is on Wayland: the tool cursors are painted into it instead of handed to the
     /// compositor as bitmaps ([`cursors::os_cursors`]).
     pub wayland: bool,
+    /// On Wayland, no cursor theme can be loaded, so winit sets no pointer and the compositor's
+    /// default one would never come back once the canvas hid it: the canvas keeps the system
+    /// pointer visible next to the tool glyph ([`cursors::hide_system_pointer`], #2450).
+    pub no_cursor_theme: bool,
 }
 
 /// Cached canvas raster.
@@ -298,6 +311,8 @@ pub struct CanvasCache {
     pub selection_box: Option<((u64, u64, bool), Option<vectorcraft_doc::OrientedBox>)>,
     /// [`VectorcraftApp::selection_bounds`] for (document uid, revision).
     pub selection_bounds: Option<((u64, u64), Option<vectorcraft_geom::Rect>)>,
+    /// [`VectorcraftApp::content_bounds`] for (document uid, revision).
+    pub content_bounds: Option<((u64, u64), Option<vectorcraft_geom::Rect>)>,
     /// The tools' cursors as OS cursor bitmaps.
     pub cursors: cursors::Images,
 }
@@ -321,11 +336,15 @@ pub struct CacheKey {
     pub h: u32,
     pub outline: bool,
     pub trim: bool,
+    /// View › Hide Template: template layers left out ([`vectorcraft_render::RenderOptions::skip_templates`]).
+    pub templates: bool,
     pub ppp: f32,
     pub hidden: Vec<u64>,
     pub rot: f64,
     /// General › Anti-aliased Artwork.
     pub anti_alias: bool,
+    /// Type › Highlight Alternate Glyphs (#394).
+    pub highlight_alternate_glyphs: bool,
     /// [`vectorcraft_render::placed_document::generation`]: placed documents' bitmaps made since.
     pub placed: u64,
     /// View › Pixel Preview: the document pixels rendered (x0, y0, x1, y1), one per point, shown
@@ -392,6 +411,8 @@ pub struct VectorcraftApp {
     clipboard_out: Option<String>,
     clipboard_published: Option<String>,
     pub(crate) clipboard_in: Option<vectorcraft_engine::cmd::clipboard::Flavour>,
+    /// The Copy or Cut whose formats go to the system clipboard ([`Self::publish_clipboard`]).
+    clipboard_publishing: sysclip::Publishing,
     /// A URL to open through egui next frame (when the host has no `open_url` service).
     pending_url: Option<String>,
     /// Windows and Linux: the window has no OS decorations, so the app bar is the title bar (drag,
@@ -416,6 +437,8 @@ pub struct VectorcraftApp {
     clipboard_probe: Option<clipboard_probe::Probe>,
     /// File dialogs shown off the UI thread and what runs again with their answers.
     pub(crate) picks: picks::Picks,
+    /// The screen color sampler shown and not answered yet, and where its color goes.
+    pub(crate) screen_sampler: Option<screen_color::Waiting>,
     /// The look for fonts installed or removed while the app was in the background, running
     /// ([`Self::refresh_installed_fonts`]): whether they were.
     font_check: Option<std::sync::mpsc::Receiver<bool>>,
@@ -491,6 +514,7 @@ impl VectorcraftApp {
                 hidden_chars: Default::default(),
                 selection_box: None,
                 selection_bounds: None,
+                content_bounds: None,
                 cursors: Default::default(),
             },
             perf: Perf::default(),
@@ -500,6 +524,7 @@ impl VectorcraftApp {
             clipboard_out: None,
             clipboard_published: None,
             clipboard_in: None,
+            clipboard_publishing: Default::default(),
             pending_url: None,
             control_rx: None,
             pending_screenshots: vec![],
@@ -523,6 +548,7 @@ impl VectorcraftApp {
             system_paste_at: f64::NEG_INFINITY,
             clipboard_probe: None,
             picks: picks::Picks::default(),
+            screen_sampler: None,
             font_check: None,
             paste_chord: Default::default(),
             background: Default::default(),
@@ -611,13 +637,7 @@ impl VectorcraftApp {
 
     /// The zero point shown by rulers and position fields; command coordinates stay absolute.
     pub(crate) fn ruler_origin(&self) -> vectorcraft_geom::Point {
-        let origin = self.session.active().map_or(vectorcraft_geom::Point::ZERO, |d| d.doc.ruler_origin);
-        // An untrusted file cannot make the ruler's tick loop or position fields overflow.
-        if origin.is_finite() && origin.x.abs() <= vectorcraft_engine::MAX_COORD && origin.y.abs() <= vectorcraft_engine::MAX_COORD {
-            origin
-        } else {
-            vectorcraft_geom::Point::ZERO
-        }
+        self.session.active().map_or(vectorcraft_geom::Point::ZERO, |d| d.doc.ruler_origin_or_zero())
     }
     pub fn view_mut(&mut self) -> Option<&mut View> {
         self.sync_views();
@@ -633,9 +653,11 @@ impl VectorcraftApp {
             guides: self.ui.view.guides,
             snap_to_grid: self.ui.view.snap_to_grid,
             snap_to_pixel: self.ui.view.snap_to_pixel,
-            show_bbox: self.ui.view.bounding_box,
+            // View › Hide Edges: the canvas draws neither the bounding box (with the type widget)
+            // nor the Live Corners widgets, and the tools do not answer the pointer on them.
+            show_bbox: self.ui.view.bounding_box && self.ui.view.edges,
             snap_to_point: self.ui.view.snap_to_point,
-            corner_widgets: self.ui.view.corner_widgets,
+            corner_widgets: self.ui.view.corner_widgets && self.ui.view.edges,
             screen: self.screen_frame(),
         }
     }
@@ -675,8 +697,9 @@ impl VectorcraftApp {
             return r;
         }
         let mut params = params;
-        // Paste in place, in front, in back (#693), Select › All on Active Artboard (#1006) and Align to
-        // Artboard: onto, on or to the active artboard, the view's. A batch passes it on to those steps.
+        // Paste in place, in front and in back (#693), Select › All on Active Artboard (#1006), and Align,
+        // Distribute Objects and Distribute Spacing with Align to Artboard act on the active artboard, the
+        // view's, which the app passes as `artboard`. A batch passes it on to those steps.
         if (vectorcraft_engine::ON_ACTIVE_ARTBOARD.contains(&id) || id == "command.batch")
             && params.get("artboard").is_none()
             && self.view().is_some()
@@ -684,6 +707,22 @@ impl VectorcraftApp {
             && let Some(p) = params.as_object_mut()
         {
             p.insert("artboard".into(), serde_json::json!(panels::artboards::selected(self, n)));
+        }
+        // Object › Artboards › Fit to Artwork Bounds resizes the selected artboards (the Artboard
+        // tool's, else the active one), which the app passes as its `indices`, and Fit to Selected
+        // Art resizes the active artboard, which the app passes as its `index`.
+        if vectorcraft_engine::FIT_ACTIVE_ARTBOARD.contains(&id)
+            && params.get("index").is_none()
+            && params.get("indices").is_none()
+            && self.view().is_some()
+            && let Some(n) = self.session.active().map(|d| d.doc.artboards.len())
+            && let Some(p) = params.as_object_mut()
+        {
+            if id == "artboard.fitToArt" {
+                p.insert("indices".into(), serde_json::json!(panels::artboards::picked(self, n)));
+            } else {
+                p.insert("index".into(), serde_json::json!(panels::artboards::selected(self, n)));
+            }
         }
         if id.starts_with("edit.paste") {
             if let Err(e) = self.adopt_system_clipboard() {
@@ -1037,6 +1076,22 @@ impl VectorcraftApp {
         self.canvas.selection_bounds = Some((key, b));
         b
     }
+
+    /// The art and the artboards together, the span of the canvas's scroll bars: measured once
+    /// per revision, as the canvas reads it every frame.
+    pub fn content_bounds(&mut self) -> Option<vectorcraft_geom::Rect> {
+        let st = self.session.active()?;
+        let key = (st.uid, st.revision);
+        if let Some((k, b)) = self.canvas.content_bounds
+            && k == key
+        {
+            return b;
+        }
+        let boards = st.doc.artboards.iter().map(|a| a.rect).reduce(|r, a| r.union(a));
+        let b = vectorcraft_geom::union_opt(st.doc.art_bounds(), boards);
+        self.canvas.content_bounds = Some((key, b));
+        b
+    }
 }
 
 /// eframe isn't a dependency of this crate (the host owns the event loop); these entry points are
@@ -1101,7 +1156,9 @@ impl VectorcraftApp {
         }
         self.poll_font_check(ctx);
         picks::poll(self, ctx);
+        self.write_formats_before_text_input(ctx);
         background::poll(self);
+        screen_color::poll(self, ctx);
         opening::poll(self);
         #[cfg(not(target_arch = "wasm32"))]
         self.tick_link_updates(ctx, now);
@@ -1319,6 +1376,9 @@ impl VectorcraftApp {
         if self.ui.status_bar && self.ui.screen_mode < 3 {
             chrome::status_bar(self, ui);
             chrome::hint_bar(self, ui);
+        } else {
+            // Keeps the previous frame's value valid for menus drawn above, before the bars.
+            widgets::set_menu_floor(&ctx, ctx.content_rect().bottom());
         }
         if self.ui.toolbar && self.ui.screen_mode < 3 {
             toolbar::show(self, ui);
@@ -1343,6 +1403,7 @@ impl VectorcraftApp {
         self.ui_fonts.frame(&ctx);
         scrub::end_frame(self, &ctx);
         native_menu::sync(self, &ctx);
+        self.drop_formats_after_egui_copy(&ctx);
         self.perf.frame_ms = now_ms() - t0;
         let _ = json!(null);
     }

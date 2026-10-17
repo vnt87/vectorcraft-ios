@@ -165,14 +165,14 @@ fn save_to_swatches(app: &mut VectorcraftApp, g: &GradientPaint) {
 }
 
 /// The document's gradient swatches (groups included): name and gradient.
-fn gradient_swatches(app: &VectorcraftApp) -> Vec<(String, Gradient)> {
+fn gradient_swatches(app: &VectorcraftApp) -> Vec<(String, GradientPaint)> {
     let Some(st) = app.session.active() else { return vec![] };
     let d = &st.doc;
     d.swatches
         .iter()
         .chain(d.swatch_groups.iter().flat_map(|g| g.swatches.iter()))
         .filter_map(|s| match &s.paint {
-            Paint::Gradient(g) => Some((s.name.clone(), g.gradient.clone())),
+            Paint::Gradient(g) => Some((s.name.clone(), (**g).clone())),
             _ => None,
         })
         .collect()
@@ -370,7 +370,7 @@ fn freeform_section(app: &mut VectorcraftApp, ui: &mut Ui, g: &GradientPaint) {
 fn thumbnail(app: &mut VectorcraftApp, ui: &mut Ui, g: &GradientPaint, is_grad: bool) {
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::click_and_drag());
-    widgets::gradient_chip(ui, r, &g.gradient);
+    widgets::gradient_chip(ui, r, g);
     ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
     let resp = resp.on_hover_text(tl!("Gradient Fill: click to apply, drag onto art"));
     if resp.clicked() && !is_grad {

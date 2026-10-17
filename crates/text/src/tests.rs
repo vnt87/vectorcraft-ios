@@ -405,6 +405,26 @@ fn fallback_font_per_character() {
     assert_eq!(l.glyphs[2].font_id, primary.id());
 }
 
+/// A space the primary font doesn't map goes to the fallback face like any other character
+/// (#1844): an ideographic space in a face without U+3000 keeps its em, so an indent made with it
+/// isn't lost. A tab, which the layout handles itself, stays with the primary face. Needs a bundled
+/// face with U+3000 and あ (craft-fonts; skipped without it).
+#[test]
+fn whitespace_the_primary_font_lacks_takes_the_fallback_face() {
+    let primary = db().face("Source Sans 3", "Regular").unwrap();
+    assert!(!primary.covers('\u{3000}'));
+    if ['\u{3000}', 'あ'].iter().any(|&c| db().fallback_for(c, primary.id()).is_none()) {
+        eprintln!("skipped: built without craft-fonts (set CRAFT_FONTS_DIR to a craft-fonts checkout to run it)");
+        return;
+    }
+    let l = layout(db(), &point("あ\u{3000}あ", style(20.0)));
+    let width: f64 = l.glyphs.iter().map(|g| g.advance).sum();
+    assert!((width - 60.0).abs() < 0.01, "あ　あ sets at 3 em: {:?}", l.glyphs.iter().map(|g| g.advance).collect::<Vec<_>>());
+    assert_ne!(l.glyphs[1].font_id, primary.id());
+    let l = layout(db(), &point("a\tb", style(20.0)));
+    assert!(l.glyphs.iter().all(|g| g.font_id == primary.id()));
+}
+
 #[test]
 fn multiple_runs_and_styles() {
     let mut t = point("", style(10.0));
@@ -467,6 +487,39 @@ fn tab_stops_position_text() {
 }
 
 #[test]
+fn a_leading_tab_takes_its_width_in_the_line_and_the_justification() {
+    // A tab at the start of area type is 36 pt wide: the line breaks and justifies around that,
+    // so no line reaches past the frame's right edge (#2457).
+    for justify in [Justify::Left, Justify::JustifyLeft] {
+        let t =
+            area("\tSample copy flows here while the layout takes shape. Swap these words", style(12.0), Rect::new(0.0, 0.0, 200.0, 400.0), justify);
+        let lay = layout(db(), &t);
+        let right = lay.glyphs.iter().filter(|g| !t.plain_text()[g.byte..].starts_with(' ')).map(|g| g.origin.x + g.advance).fold(0.0, f64::max);
+        assert!(right <= 200.0 + 1e-6, "{justify:?}: the type reaches {right}");
+        let first = lay.glyphs.iter().find(|g| g.byte == 1).map(|g| g.origin.x).unwrap();
+        assert!((first - 36.0).abs() < 1e-6, "{justify:?}: the text after the tab starts at {first}");
+    }
+}
+
+#[test]
+fn a_centred_or_right_aligned_line_sets_its_tabs_as_if_it_started_at_the_left() {
+    use vectorcraft_doc::{TabAlign, TabStop};
+    // "A<tab>B" with a stop at 100 pt is 100 pt plus B wide whatever the alignment: the whole line
+    // moves, the gap between A and B stays 100 pt, and a right aligned line ends on the edge (#2457).
+    for justify in [Justify::Center, Justify::Right, Justify::JustifyCenter, Justify::JustifyRight] {
+        let mut t = area("A\tB", style(12.0), Rect::new(0.0, 0.0, 200.0, 100.0), justify);
+        t.para.tabs = vec![TabStop { position: 100.0, align: TabAlign::Left, leader: String::new(), align_on: '.' }];
+        let lay = layout(db(), &t);
+        let at = |byte: usize| lay.glyphs.iter().find(|g| g.byte == byte).map(|g| g.origin.x).unwrap();
+        assert!((at(2) - at(0) - 100.0).abs() < 1e-6, "{justify:?}: A at {}, B at {}", at(0), at(2));
+        if matches!(justify, Justify::Right | Justify::JustifyRight) {
+            let b = lay.glyphs.iter().find(|g| g.byte == 2).unwrap();
+            assert!((b.origin.x + b.advance - 200.0).abs() < 1e-6, "{justify:?}: the line ends at {}", b.origin.x + b.advance);
+        }
+    }
+}
+
+#[test]
 fn tab_leaders_line_up_from_line_to_line_and_stop_short_of_the_stop() {
     use vectorcraft_doc::{TabAlign, TabStop};
     let mut t = point("A\t1\nAAAAA\t2", style(12.0));
@@ -516,6 +569,19 @@ fn japanese_text_uses_the_craft_fonts_mincho_after_the_bundled_fonts() {
     assert!(CRAFT_FONTS.iter().any(|f| f.family == face.family));
     // Latin keeps the bundled fallback family.
     assert_eq!(db().face_covering('a').unwrap().family, FALLBACK_FAMILY);
+}
+
+#[test]
+fn all_supplied_craft_font_families_are_registered_without_system_fonts() {
+    if CRAFT_FONTS.is_empty() {
+        eprintln!("skipped: built without craft-fonts (set CRAFT_FONTS_DIR to a checkout)");
+        return;
+    }
+    let db = FontDb::with_font_dirs(vec![]);
+    for font in CRAFT_FONTS {
+        let face = db.face(font.family, font.style).unwrap();
+        assert_eq!(face.family, font.family, "{} {}", font.family, font.style);
+    }
 }
 
 #[test]

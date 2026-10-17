@@ -77,6 +77,14 @@ fn every_setting_reaches_the_document() {
 }
 
 #[test]
+fn a_length_with_a_percentage_is_a_share_of_the_value_before_it() {
+    let s = new_doc(json!({"width": "200mm*50%", "height": "100mm+25%", "units": "Millimeters"}));
+    let r = boards(&s)[0];
+    assert!((r.width() - Unit::Millimeters.to_pt(100.0)).abs() < 1e-9, "{}", r.width());
+    assert!((r.height() - Unit::Millimeters.to_pt(125.0)).abs() < 1e-9, "{}", r.height());
+}
+
+#[test]
 fn a_white_background_exports_opaque() {
     let alpha = |bg: &str| {
         let mut s = new_doc(json!({"width": 20, "height": 20, "backgroundContents": bg}));
@@ -215,6 +223,17 @@ fn saved_presets_live_in_the_preferences() {
     assert_eq!(s.execute("file.newPresets.delete", &json!({"name": "MINE"})).unwrap(), json!({"deleted": "mine"}));
     assert!(presets(&mut s, "Saved").is_empty());
     assert!(s.execute("file.newPresets.save", &json!({"name": " "})).is_err());
+}
+
+#[test]
+fn a_saved_preset_with_the_resolution_out_of_range_reads_in_range() {
+    let mut s = Session::new();
+    let saved = json!({"newDocPresets": [{"name": "Zero", "rasterEffectsPpi": 0}, {"name": "Huge", "rasterEffectsPpi": 5000}]});
+    s.apply_prefs(serde_json::from_value(saved).unwrap());
+    let ppi: Vec<Option<f64>> = presets(&mut s, "Saved").iter().map(|p| p["rasterEffectsPpi"].as_f64()).collect();
+    assert_eq!(ppi, [Some(1.0), Some(2400.0)]);
+    s.execute("file.new", &json!({"preset": "Zero"})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.raster_effects_ppi, 1.0);
 }
 
 #[test]

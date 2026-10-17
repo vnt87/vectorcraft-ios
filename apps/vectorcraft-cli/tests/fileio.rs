@@ -8,9 +8,16 @@ use serde_json::Value;
 
 const BIN: &str = env!("CARGO_BIN_EXE_vectorcraft-cli");
 
+/// Returns the path of `name` in `vectorcraft-cli-fileio-<pid>` in the temp folder. The first call
+/// removes that folder and creates it again empty.
 fn tmp(name: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("vectorcraft-cli-fileio-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("vectorcraft-cli-fileio-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    });
     dir.join(name).to_string_lossy().to_string()
 }
 
@@ -86,7 +93,10 @@ fn help_lists_readable_formats() {
 #[test]
 fn help_lists_perf_deep() {
     let out = ok(&["--help"]);
-    assert!(out.contains("vectorcraft-cli perf [--paths N] [--deep]") && out.contains("--deep also times"), "{out}");
+    assert!(
+        out.contains("vectorcraft-cli perf [--paths N] [--deep]") && out.contains("--deep also times") && out.contains("with the peak so far on"),
+        "{out}"
+    );
 }
 
 /// `info` reports the import warnings: an EPS read only up to an error names it.
@@ -114,4 +124,58 @@ fn convert_reports_import_warnings() {
     let out: Value = serde_json::from_str(ok(&["convert", &svg, &png]).trim()).unwrap();
     let w = out["importWarnings"].as_array().unwrap_or_else(|| panic!("{out}"));
     assert!(w.iter().any(|w| w.as_str().unwrap().contains("nowhere-to-be-found.png")), "{out}");
+}
+
+#[test]
+fn convert_writes_legacy_ai_with_its_options() {
+    // Two artboards, a shown rectangle and a hidden one.
+    let src = tmp("legacy.vectorcraft");
+    ok(&[
+        "run",
+        "--cmd",
+        "file.new",
+        "--params",
+        r#"{"width":120,"height":80,"artboards":2}"#,
+        "--cmd",
+        "shape.rectangle",
+        "--params",
+        r#"{"x":10,"y":10,"width":20,"height":10}"#,
+        "--cmd",
+        "shape.rectangle",
+        "--params",
+        r#"{"x":40,"y":10,"width":20,"height":10}"#,
+        "--cmd",
+        "object.hide",
+        "--export",
+        &src,
+    ]);
+    // One file per artboard, named after it; hidden objects in a hidden layer by default.
+    let out = tmp("legacy.ai");
+    let r: Value = serde_json::from_str(&ok(&["convert", &src, &out, "--ai-version", "7"])).unwrap();
+    let files: Vec<&str> = r["files"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(files.len(), 2, "{r}");
+    assert!(files.iter().all(|f| std::fs::read(f).unwrap().starts_with(b"%!PS-Adobe-3.0")), "{r}");
+    assert!(r["warnings"].to_string().contains("hidden layer"), "{r}");
+    // One artboard is the file itself; the hidden rectangle left out.
+    let one = tmp("legacy-one.ai");
+    let r: Value = serde_json::from_str(&ok(&[
+        "convert",
+        &src,
+        &one,
+        "--ai-version",
+        "7",
+        "--range",
+        "1",
+        "--hidden-objects",
+        "omit",
+        "--transparent-images",
+        "omit",
+    ]))
+    .unwrap();
+    assert!(r["warnings"].to_string().contains("hidden objects are left out"), "{r}");
+    assert!(std::fs::read(&one).unwrap().starts_with(b"%!PS-Adobe-3.0"));
+    // A value the engine doesn't take is an error.
+    let bad = Command::new(BIN).args(["convert", &src, &tmp("bad.ai"), "--ai-version", "7", "--hidden-objects", "behind"]).output().unwrap();
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("hiddenObjects"), "{}", String::from_utf8_lossy(&bad.stderr));
 }

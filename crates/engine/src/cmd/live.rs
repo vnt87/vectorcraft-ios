@@ -383,7 +383,7 @@ fn replace_with(d: &mut Document, id: NodeId, nodes: Vec<Node>) -> Result<Vec<No
 }
 
 /// Fresh ids for any id-0 (generated) node in `n`'s subtree; keeps real ids.
-fn fix_ids(d: &mut Document, n: &mut Node) {
+pub(super) fn fix_ids(d: &mut Document, n: &mut Node) {
     if n.id == NodeId(0) {
         n.id = d.alloc_id();
     }

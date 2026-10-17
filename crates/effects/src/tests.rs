@@ -1,11 +1,31 @@
 use serde_json::{Value, json};
 use vectorcraft_doc::Effect;
-use vectorcraft_geom::{PathData, Point, Rect, Shape, SubPath, shapes};
+use vectorcraft_geom::{Affine, PathData, Point, Rect, Shape, SubPath, shapes};
 
 use super::*;
 
 fn fx(id: &str, params: Value) -> Effect {
     Effect { id: id.into(), params, visible: true }
+}
+
+/// Every image under `n`, in document order (its placement's x).
+fn image_xs(n: &Node, out: &mut Vec<f64>) {
+    if let NodeKind::Image(im) = &n.kind {
+        out.push(im.xf.as_coeffs()[4]);
+    }
+    for c in n.children().into_iter().flatten() {
+        image_xs(c, out);
+    }
+}
+
+/// Every symbol instance under `n`, in document order (its placement's x).
+fn instance_xs(n: &Node, out: &mut Vec<f64>) {
+    if let NodeKind::SymbolInstance { xf, .. } = &n.kind {
+        out.push(xf.as_coeffs()[4]);
+    }
+    for c in n.children().into_iter().flatten() {
+        instance_xs(c, out);
+    }
 }
 
 fn square() -> PathData {
@@ -224,10 +244,184 @@ fn stacked_transform_copies_stay_within_the_anchor_budget() {
     assert_eq!(run("distort.transform", p, &square()).subpaths.len(), 1001);
 }
 
+/// #2042: stacked Transform effects multiply their image copies as they do their anchors; the
+/// image nodes they make are bounded, whatever each one's count.
+#[test]
+fn stacked_transform_copies_stay_within_the_image_budget() {
+    use std::sync::Arc;
+
+    use vectorcraft_doc::{ImageObject, NodeId};
+    let id = NodeId(9);
+    let image = || {
+        Node::new(
+            id,
+            NodeKind::Image(Box::new(ImageObject {
+                key: "k".into(),
+                width: 40,
+                height: 40,
+                xf: Affine::translate((10.0, 0.0)),
+                link: None,
+                placement: Default::default(),
+            })),
+        )
+    };
+    let count = |art: &Node| {
+        let mut xs = vec![];
+        image_xs(art, &mut xs);
+        xs.len()
+    };
+    let m = Affine::translate((70.0, 0.0));
+    let mut art = Node::group(id, vec![Arc::new(image())]);
+    let mut counts = vec![];
+    for _ in 0..3 {
+        crate::reshape::transform_placed_within(&mut art, m, 1000, 100);
+        counts.push(count(&art));
+    }
+    assert_eq!(counts, [100, 100, 100], "99 copies, then no room for a copy of them");
+    // Within the budget every copy is made, and the effect's own budget takes a thousand copies.
+    let mut art = Node::group(id, vec![Arc::new(image())]);
+    crate::reshape::transform_placed_within(&mut art, m, 24, 100);
+    assert_eq!(count(&art), 25);
+    let mut g = Node::group(id, vec![Arc::new(image())]);
+    g.appearance.effects.push(fx("distort.transform", json!({"moveH": 70, "copies": 1000})));
+    assert_eq!(count(&evaluate_container(&g).unwrap()), 1001);
+}
+
 #[test]
 fn transform_copies_stop_before_they_overflow() {
     let out = run("distort.transform", json!({"scaleH": 100000, "scaleV": 100000, "copies": 1000}), &square());
     assert!(all_finite(&out) && out.subpaths.len() < 10, "{}", out.subpaths.len());
+}
+
+/// #2023: a Transform effect on a group moves, scales and copies its images like its paths: the
+/// map goes into each image's placement, and every copy is an image node of its own.
+#[test]
+fn transform_on_a_group_moves_and_copies_its_images() {
+    use std::sync::Arc;
+
+    use vectorcraft_doc::{Appearance, ImageObject, Node, NodeId, NodeKind};
+    let id = NodeId(9);
+    let sq = Node::path(id, square(), Appearance::default());
+    let image = Node::new(
+        id,
+        NodeKind::Image(Box::new(ImageObject {
+            key: "k".into(),
+            width: 40,
+            height: 40,
+            xf: Affine::translate((10.0, 0.0)),
+            link: None,
+            placement: Default::default(),
+        })),
+    );
+    let mut g = Node::group(id, vec![Arc::new(sq), Arc::new(image)]);
+    g.appearance.effects.push(fx("distort.transform", json!({"moveH": 70, "copies": 2})));
+    let art = evaluate_container(&g).unwrap();
+    let mut xs = vec![];
+    image_xs(&art, &mut xs);
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs, [10.0, 80.0, 150.0], "the image and its two copies, 70 pt apart");
+    // Without copies the image itself takes the transform, as a path does.
+    let mut g = Node::group(
+        id,
+        vec![Arc::new(Node::new(
+            id,
+            NodeKind::Image(Box::new(ImageObject {
+                key: "k".into(),
+                width: 40,
+                height: 40,
+                xf: Affine::translate((10.0, 0.0)),
+                link: None,
+                placement: Default::default(),
+            })),
+        ))],
+    );
+    g.appearance.effects.push(fx("distort.transform", json!({"scaleH": 50, "scaleV": 50, "reference": 8})));
+    let art = evaluate_container(&g).unwrap();
+    let mut xs = vec![];
+    image_xs(&art, &mut xs);
+    // The bounds are the image itself, so the bottom-right reference is its own: it halves in place.
+    assert_eq!(xs, [30.0], "scaled about its own bottom-right corner");
+}
+
+/// #2023: a Transform effect on a group moves and copies its symbol instances as it does its paths
+/// and images: the map goes into each instance's placement, and every copy is an instance of its
+/// own.
+#[test]
+fn transform_on_a_group_moves_and_copies_its_symbol_instances() {
+    use std::sync::Arc;
+
+    use vectorcraft_doc::{Appearance, Node, NodeId, NodeKind};
+    let id = NodeId(9);
+    let instance = || Node::new(id, NodeKind::SymbolInstance { symbol: "s".into(), xf: Affine::translate((5.0, 40.0)) });
+    let xs = |art: &Node| {
+        let mut xs = vec![];
+        instance_xs(art, &mut xs);
+        xs.sort_by(f64::total_cmp);
+        xs
+    };
+    let mut g = Node::group(id, vec![Arc::new(Node::path(id, square(), Appearance::default())), Arc::new(instance())]);
+    g.appearance.effects.push(fx("distort.transform", json!({"moveH": 70, "copies": 2})));
+    assert_eq!(xs(&evaluate_container(&g).unwrap()), [5.0, 75.0, 145.0], "the instance and its two copies, 70 pt apart");
+    // Without copies the instance itself takes the transform, as a path does.
+    let mut g = Node::group(id, vec![Arc::new(instance())]);
+    g.appearance.effects.push(fx("distort.transform", json!({"moveH": 70})));
+    assert_eq!(xs(&evaluate_container(&g).unwrap()), [75.0]);
+}
+
+/// Images and symbol instances share the copy budget: copies of one leave less room for the other.
+#[test]
+fn images_and_symbol_instances_share_the_copy_budget() {
+    use std::sync::Arc;
+
+    use vectorcraft_doc::{ImageObject, NodeId};
+    let id = NodeId(9);
+    let image = Node::new(
+        id,
+        NodeKind::Image(Box::new(ImageObject {
+            key: "k".into(),
+            width: 40,
+            height: 40,
+            xf: Affine::translate((10.0, 0.0)),
+            link: None,
+            placement: Default::default(),
+        })),
+    );
+    let instance = Node::new(id, NodeKind::SymbolInstance { symbol: "s".into(), xf: Affine::IDENTITY });
+    let mut art = Node::group(id, vec![Arc::new(image), Arc::new(instance)]);
+    crate::reshape::transform_placed_within(&mut art, Affine::translate((70.0, 0.0)), 1000, 100);
+    let (mut images, mut instances) = (vec![], vec![]);
+    image_xs(&art, &mut images);
+    instance_xs(&art, &mut instances);
+    // The image takes the 98 copies there is room for; none is left for the instance.
+    assert_eq!((images.len(), instances.len()), (99, 1));
+}
+
+/// As a path's do, a Transform effect's copies of an image stop before one reaches further than
+/// `MAX_REACH` from the origin.
+#[test]
+fn transform_copies_of_images_stop_at_the_reach_limit() {
+    use std::sync::Arc;
+
+    use vectorcraft_doc::{ImageObject, NodeId};
+    let id = NodeId(9);
+    let image = Node::new(
+        id,
+        NodeKind::Image(Box::new(ImageObject {
+            key: "k".into(),
+            width: 40,
+            height: 40,
+            xf: Affine::translate((10.0, 0.0)),
+            link: None,
+            placement: Default::default(),
+        })),
+    );
+    let mut g = Node::group(id, vec![Arc::new(image)]);
+    // The largest move: every copy is 1e7 pt further right, so the 100th would end past 1e9.
+    g.appearance.effects.push(fx("distort.transform", json!({"moveH": 1.0e7, "copies": 1000})));
+    let mut xs = vec![];
+    image_xs(&evaluate_container(&g).unwrap(), &mut xs);
+    assert_eq!(xs.len(), 100, "the image and the 99 copies that stay within reach");
+    assert!(xs.iter().all(|x| x + 40.0 <= 1.0e9));
 }
 
 #[test]
@@ -316,6 +510,31 @@ fn zigzag_spaces_ridges_evenly_along_a_straight_line() {
     }
 }
 
+/// #2343: Smooth points make a continuous wave, not a zigzag with rounded tips. Every peak and
+/// valley is a smooth point whose handles run parallel to the line, and the curve between them
+/// follows a cosine, even where the ridges are much taller than they are apart.
+#[test]
+fn zigzag_smooth_is_a_wave() {
+    use vectorcraft_geom::kurbo::ParamCurve;
+    let line = PathData::single(SubPath::polyline(&[Point::new(0.0, 0.0), Point::new(100.0, 0.0)], false));
+    for size in [3.0, 30.0] {
+        let out = run("distort.zigZag", json!({"ridges": 9, "points": "smooth", "size": size}), &line);
+        let sp = &out.subpaths[0];
+        assert_eq!(sp.anchors.len(), 11);
+        for a in &sp.anchors {
+            assert!(close(a.h_in.y, a.p.y, 1e-9) && close(a.h_out.y, a.p.y, 1e-9), "size {size}: handles not level at {a:?}");
+        }
+        for i in 0..sp.segment_count() {
+            let c = sp.segment(i);
+            for k in 0..=20 {
+                let q = c.eval(k as f64 / 20.0);
+                let want = -size * (std::f64::consts::PI * q.x / 10.0).cos();
+                assert!((q.y - want).abs() < 0.03 * size, "size {size}: {q:?} off the wave ({want})");
+            }
+        }
+    }
+}
+
 /// #1554 on curves: a circle's ridges sit at equal angles, at the radius plus and minus the size in
 /// turn all the way round.
 #[test]
@@ -379,6 +598,18 @@ fn outline_stroke_uses_context_stroke() {
 }
 
 #[test]
+fn outline_object_is_a_geometry_effect_that_keeps_the_path() {
+    let info = effect_info("path.outlineObject").unwrap();
+    assert_eq!((info.label, info.menu, &info.defaults, info.raster), ("Outline Object", &["Effect", "Path"][..], &json!({}), false));
+    assert!(is_geometry("path.outlineObject"));
+    assert_eq!(run("path.outlineObject", json!({}), &square()), square());
+    // The effects after it reshape the same geometry.
+    let b = square().bounds().unwrap();
+    let offset = fx("path.offsetPath", json!({"offset": 5}));
+    assert_eq!(apply_geometry(&[fx("path.outlineObject", json!({})), offset.clone()], &square(), b), apply_geometry(&[offset], &square(), b));
+}
+
+#[test]
 fn convert_to_shape_sizes() {
     let r = run("convertToShape.rectangle", json!({"extraW": 20, "extraH": 10}), &square()).bounds().unwrap();
     assert!(close(r.width(), 120.0, 1e-9) && close(r.height(), 110.0, 1e-9));
@@ -398,6 +629,66 @@ fn round_corners_replaces_corners() {
     // An ellipse has no sharp corners → unchanged.
     let el = shapes::ellipse(Rect::new(0.0, 0.0, 50.0, 30.0));
     assert_eq!(run("stylize.roundCorners", json!({}), &el), el);
+}
+
+/// A D: a straight back, a curved bowl, and two corners where the bowl meets the straight
+/// sides (the anchors there carry the bowl's handles).
+fn d_shape() -> PathData {
+    use vectorcraft_geom::Anchor;
+    let p = Point::new;
+    PathData::new(vec![SubPath::new(
+        vec![
+            Anchor::corner(p(0.0, 0.0)),
+            Anchor::with_handles(p(50.0, 0.0), p(50.0, 0.0), p(80.0, 20.0)),
+            Anchor::with_handles(p(50.0, 100.0), p(80.0, 80.0), p(50.0, 100.0)),
+            Anchor::corner(p(0.0, 100.0)),
+        ],
+        true,
+    )])
+}
+
+#[test]
+fn round_corners_also_rounds_where_a_curve_meets_a_line() {
+    let d = d_shape();
+    let out = run("stylize.roundCorners", json!({"radius": 8}), &d);
+    // All four corners are cut, the two curve-line ones too: two anchors each.
+    assert_eq!(out.anchor_count(), 8);
+    assert!(all_finite(&out));
+    // Every cut leaves both sides smoothly: no corner is left anywhere.
+    assert!(vectorcraft_geom::corners::path_corners(&out).is_empty(), "{out:?}");
+    let (before, after) = (d.to_bezpath().area().abs(), out.to_bezpath().area().abs());
+    assert!(after < before && after > before - 4.0 * 8.0 * 8.0, "{before} -> {after}");
+    // The cut at a curve-line corner meets the straight side 8 from the corner.
+    let p = Point::new;
+    assert!(out.subpaths[0].anchors.iter().any(|a| a.p.distance(p(42.0, 0.0)) < 1e-9), "{out:?}");
+}
+
+#[test]
+fn round_corners_keeps_straight_corners_as_they_were() {
+    // The D's straight corners are rounded as before, next to the new cuts: same anchors, same
+    // quarter-circle handles, and the path still starts at its first corner's rounding.
+    use vectorcraft_geom::Anchor;
+    let p = Point::new;
+    let k = 8.0 * shapes::KAPPA;
+    let out = stylize::round_corners(&d_shape(), 8.0);
+    let a = &out.subpaths[0].anchors;
+    assert_eq!(a[0], Anchor::with_handles(p(0.0, 8.0), p(0.0, 8.0), p(0.0, 8.0 - k)));
+    assert_eq!(a[1], Anchor::with_handles(p(8.0, 0.0), p(8.0 - k, 0.0), p(8.0, 0.0)));
+    // A path of straight corners only is rounded exactly as before.
+    assert_eq!(stylize::round_corners(&square(), 10.0).subpaths[0].anchors.len(), 8);
+}
+
+#[test]
+fn round_corners_keeps_where_a_closed_path_starts() {
+    // The D starting at a curve-line corner: the result starts where that corner's cut begins,
+    // on the side coming from the previous corner, as a straight corner's rounding does.
+    let mut d = d_shape();
+    d.subpaths[0].anchors.rotate_left(1);
+    let out = stylize::round_corners(&d, 8.0);
+    let start = out.subpaths[0].anchors[0].p;
+    assert!(start.distance(Point::new(42.0, 0.0)) < 1e-9, "{start:?}");
+    // An infinite radius rounds as much as fits, curve-line corners too.
+    assert_eq!(stylize::round_corners(&d, f64::INFINITY), stylize::round_corners(&d, 1e9));
 }
 
 #[test]
@@ -437,6 +728,59 @@ fn scribble_produces_filled_outline_inside_bounds() {
 }
 
 #[test]
+fn scribble_variations_are_separate() {
+    // At 0° the lines run along x: the Path Overlap variation moves their ends in x only, the
+    // Spacing variation moves them in y only, and the Curviness variation curves some of the turns.
+    let base =
+        json!({"angle": 0, "curviness": 0, "strokeWidth": 0.5, "spacing": 10, "overlapVariation": 0, "spacingVariation": 0, "curvinessVariation": 0});
+    let with = |key: &str, v: f64| {
+        let mut p = base.clone();
+        p[key] = json!(v);
+        run("stylize.scribble", p, &square())
+    };
+    let plain = run("stylize.scribble", base.clone(), &square());
+    let b = plain.bounds().unwrap();
+    let moved = |a: f64, b: f64| (a - b).abs() > 0.5;
+    let along = with("overlapVariation", 4.0).bounds().unwrap();
+    assert!(close(along.y0, b.y0, 0.06) && close(along.y1, b.y1, 0.06), "{along:?} {b:?}");
+    assert!(moved(along.x0, b.x0) || moved(along.x1, b.x1), "{along:?} {b:?}");
+    let across = with("spacingVariation", 4.0).bounds().unwrap();
+    assert!(close(across.x0, b.x0, 0.06) && close(across.x1, b.x1, 0.06), "{across:?} {b:?}");
+    assert!(moved(across.y0, b.y0) || moved(across.y1, b.y1), "{across:?} {b:?}");
+    assert_ne!(with("curvinessVariation", 50.0), plain);
+    // On a curviness of its own, the variation changes how much each turn curves.
+    let mut p = base.clone();
+    p["curviness"] = json!(20);
+    let even = run("stylize.scribble", p.clone(), &square());
+    p["curvinessVariation"] = json!(20);
+    assert_ne!(run("stylize.scribble", p, &square()), even);
+}
+
+#[test]
+fn scribble_reads_its_earlier_single_variation() {
+    // Before the separate variations, one `variation` moved the ends both along and across.
+    let old = run("stylize.scribble", json!({"variation": 3}), &square());
+    assert_eq!(old, run("stylize.scribble", json!({"overlapVariation": 3, "spacingVariation": 3}), &square()));
+    assert_eq!(upgrade_params("stylize.scribble", &json!({"variation": 3})), json!({"overlapVariation": 3, "spacingVariation": 3}));
+    // A current key given with it wins.
+    assert_eq!(
+        upgrade_params("stylize.scribble", &json!({"variation": 3, "spacingVariation": 1})),
+        json!({"overlapVariation": 3, "spacingVariation": 1})
+    );
+    assert!(default_params("stylize.scribble").unwrap().get("variation").is_none());
+}
+
+#[test]
+fn scribble_angle_is_stored_above_minus_180_and_up_to_180() {
+    for (given, stored) in [(270.0, -90.0), (-180.0, 180.0), (180.0, 180.0), (540.0, 180.0), (-270.0, 90.0), (-200.0, 160.0)] {
+        assert_eq!(new_effect("stylize.scribble", &json!({"angle": given})).unwrap().params["angle"].as_f64(), Some(stored), "{given}");
+    }
+    // An angle in range is kept as given; other effects' angles are not changed.
+    assert_eq!(upgrade_params("stylize.scribble", &json!({"angle": 45})), json!({"angle": 45}));
+    assert_eq!(upgrade_params("distort.twist", &json!({"angle": 270})), json!({"angle": 270}));
+}
+
+#[test]
 fn effects_chain_in_order_and_skip_hidden_and_raster() {
     let chain = [fx("distort.transform", json!({"moveH": 10})), fx("distort.transform", json!({"scaleH": 200}))];
     let b = apply_geometry(&chain, &square(), Rect::new(0.0, 0.0, 100.0, 100.0)).bounds().unwrap();
@@ -462,17 +806,32 @@ fn raster_effects_parse_and_outset() {
     let r = raster_effects(&list);
     assert_eq!(r.len(), 5);
     match &r[0] {
-        RasterFx::DropShadow { mode, opacity, dx, dy, blur, color } => {
+        RasterFx::DropShadow { mode, opacity, dx, dy, blur, color, darkness } => {
             assert_eq!(*mode, vectorcraft_doc::color::BlendMode::Multiply);
             assert!(close(*opacity as f64, 0.5, 1e-6));
             assert_eq!((*dx, *dy, *blur), (10.0, -4.0, 6.0));
             assert_eq!(color.to_rgb(), [1.0, 0.0, 0.0]);
+            assert_eq!(*darkness, None);
         }
         other => panic!("{other:?}"),
     }
     assert!(matches!(r[2], RasterFx::InnerGlow { center: true, .. }));
     assert!(close(outset(&list, vectorcraft_geom::Rect::ZERO), 10.0 + 9.0, 1e-9));
     assert_eq!(outset(&[], vectorcraft_geom::Rect::ZERO), 0.0);
+}
+
+#[test]
+fn drop_shadow_darkness_replaces_its_color_when_chosen() {
+    let darkness = |params: Value| match raster_effects(&[fx("stylize.dropShadow", params)]).as_slice() {
+        [RasterFx::DropShadow { darkness, .. }] => *darkness,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(darkness(json!({"shade": "darkness", "darkness": 60})), Some(0.6));
+    assert_eq!(darkness(json!({"shade": "darkness"})), Some(1.0));
+    assert_eq!(darkness(json!({"shade": "darkness", "darkness": 250})), Some(1.0));
+    // Color is the default: a Darkness value alone leaves the shadow its color.
+    assert_eq!(darkness(json!({"darkness": 60})), None);
+    assert_eq!(darkness(json!({})), None);
 }
 
 #[test]

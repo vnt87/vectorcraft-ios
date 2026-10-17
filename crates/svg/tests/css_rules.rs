@@ -84,13 +84,13 @@ fn live_corners_give_per_corner_radii_and_only_round_ones() {
         kinds[1] = CornerKind::InvertedRound;
     }
     assert!(prop(&one(&d, id, &CssOptions::default()), "border-radius").is_none(), "CSS can't cut a corner in");
-    // A radius past half the shorter side is drawn at half of it (#442), and exported so: CSS
-    // would draw it larger, its neighbours leaving room.
+    // A radius is drawn no larger than its neighbours leave room for, past half the shorter
+    // side when they are small (#2332), and exported as drawn: 50 less the 4 below it.
     if let Some(LiveShape::Rectangle { radii, kinds, .. }) = d.node_mut(id).and_then(|n| n.live_shape_mut()) {
         *radii = [60.0, 8.0, 0.0, 4.0];
         *kinds = Default::default();
     }
-    assert_eq!(prop(&one(&d, id, &CssOptions::default()), "border-radius"), Some("25px 8px 0 4px"));
+    assert_eq!(prop(&one(&d, id, &CssOptions::default()), "border-radius"), Some("46px 8px 0 4px"));
 }
 
 #[test]
@@ -220,6 +220,16 @@ fn shadows_and_unsupported_art() {
     let id = add(&mut d, n);
     let r = one(&d, id, &CssOptions::default());
     assert_eq!(prop(&r, "box-shadow"), Some("2px 3px 4px rgba(0, 0, 0, 0.5)"));
+    // A shadow with Darkness takes the object's own colors, which a CSS shadow can't.
+    let mut n = rect(&mut d, (0.0, 0.0, 50.0, 50.0), 0.0);
+    n.appearance.effects.push(Effect {
+        id: "stylize.dropShadow".into(),
+        params: serde_json::json!({"x": 2, "y": 3, "blur": 4, "opacity": 50, "shade": "darkness"}),
+        visible: true,
+    });
+    let shaded = add(&mut d, n);
+    let r = one(&d, shaded, &CssOptions::default());
+    assert!(prop(&r, "box-shadow").is_none() && r.unsupported.is_some(), "{r:?}");
     // A star is no box: described as its box, or with rasterize as its picture.
     let star = Node::path(
         d.alloc_id(),

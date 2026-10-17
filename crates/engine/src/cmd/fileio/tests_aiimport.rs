@@ -82,6 +82,27 @@ fn an_illustrator_ai_file_opens_from_its_editing_data() {
     assert_ne!(names(&s.doc().unwrap().doc.layers), ["Art", "Hidden"]);
 }
 
+/// A 1-bit RGB image opens from the editing data in the colors its PDF part shows.
+#[test]
+fn a_one_bit_rgb_image_opens_from_the_editing_data_in_its_colors() {
+    // 3 × 1: red, green, blue (100 010 001), as hex samples in both parts.
+    let raster = "%AI5_File:\n%AI5_BeginRaster\n() 1 XG\n/DeviceRGB XN\n[ 60 0 0 60 10 90 ] 3 1 0 Xh\n\
+         [ 60 0 0 60 10 90 ] 0 0 3 1 3 1 1 3 0 0 0 0 4 4 0 0\n%%BeginData: 6\rXI\n8880\n%%EndData\r\nXH\r\n%AI5_EndRaster\r\nN\r\n";
+    let data = ai::editing_data(200.0, 100.0, &ai::layer("Art", raster));
+    let page = "q 180 0 0 60 10 30 cm BI /W 3 /H 1 /CS /RGB /BPC 1 /F /AHx ID 8880> EI Q";
+    let file = ai::ai(&compressed(data.as_bytes()), page);
+    let mut s = Session::new();
+    let r = open(&mut s, "bits.ai", &file, json!({})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    assert_eq!(names(&doc.layers), ["Art"], "{r}");
+    let mut found = vec![];
+    doc.visit_images(|_, im| {
+        let img = image::load_from_memory(&doc.images[&im.key].bytes).unwrap().to_rgb8();
+        found.push(img.pixels().map(|p| p.0).collect::<Vec<_>>());
+    });
+    assert_eq!(found, [[[255, 0, 0], [0, 255, 0], [0, 0, 255]]], "{r}");
+}
+
 /// A PDF saved with the editing data opens from it, as a `.ai` does (#868).
 #[test]
 fn a_pdf_saved_with_the_editing_data_opens_from_it() {
@@ -220,6 +241,36 @@ fn editing_data_false_opens_only_what_the_page_prints() {
     assert!(e.contains("placeholder"), "{e}");
 }
 
+/// A CMYK image opens with the same ink amounts from a `.ai` file's editing data as from its PDF
+/// part.
+#[test]
+fn a_cmyk_image_keeps_its_inks_from_the_editing_data_as_from_the_pdf_part() {
+    // 3 × 1: cyan, 100% black, then a mix, as hex samples in both parts.
+    let inks = [255u8, 0, 0, 0, 0, 0, 0, 255, 12, 34, 56, 78];
+    let hex: String = inks.iter().map(|b| format!("{b:02x}")).collect();
+    let raster = format!(
+        "%AI5_File:\n%AI5_BeginRaster\n() 1 XG\n/DeviceCMYK XN\n[ 10 0 0 10 10 60 ] 3 1 0 Xh\n\
+         [ 10 0 0 10 10 60 ] 0 0 3 1 3 1 8 4 0 0 0 0 4 4 0 0\n%%BeginData: {}\rXI\n{hex}\n%%EndData\r\nXH\r\n%AI5_EndRaster\r\nN\r\n",
+        hex.len() + 2
+    );
+    let data = ai::editing_data(200.0, 100.0, &ai::layer("Art", &raster));
+    let page = format!("q 30 0 0 10 10 50 cm BI /W 3 /H 1 /CS /CMYK /BPC 8 /F /AHx ID {hex}> EI Q");
+    let file = ai::ai(&compressed(data.as_bytes()), &page);
+    let opened = |s: &Session| {
+        let doc = &s.doc().unwrap().doc;
+        let mut found = vec![];
+        doc.visit_images(|_, im| found.push(doc.images[&im.key].cmyk().map(|i| i.data)));
+        found
+    };
+    let mut s = Session::new();
+    let r = open(&mut s, "cmyk.ai", &file, json!({})).unwrap();
+    assert_eq!(names(&s.doc().unwrap().doc.layers), ["Art"], "{r}");
+    assert_eq!(opened(&s), [Some(inks.to_vec())], "from the editing data");
+    let r = open(&mut s, "cmyk.ai", &file, json!({"editingData": false})).unwrap();
+    assert_ne!(names(&s.doc().unwrap().doc.layers), ["Art"], "{r}");
+    assert_eq!(opened(&s), [Some(inks.to_vec())], "from the PDF part");
+}
+
 #[test]
 fn fit_to_artwork_bounds_leaves_out_the_hidden_art_and_guides_the_editing_data_has() {
     // A shown square; a hidden one and a long guide far from it, which the page doesn't draw.
@@ -250,6 +301,30 @@ fn type_asked_for_as_outlines_opens_a_file_whose_type_shows_from_its_pdf_part() 
     let r = open(&mut s, "type.ai", &file, json!({"textAs": "outlines"})).unwrap();
     assert!(r["warnings"].to_string().contains("outlines"), "{r}");
     assert_ne!(names(&s.doc().unwrap().doc.layers), ["Art"], "{r}");
+}
+
+/// A `.ai` saved in units of 10 points: its PDF part's page is 200 × 100 with `/UserUnit 10`, and
+/// its editing data has the artboard and a red rectangle in the same units. It opens at 2000 × 1000
+/// pt, from its editing data and from its PDF part alone, with the rectangle ten times as large,
+/// and `document.pdfInfo` gives the page in points (#1482).
+#[test]
+fn an_ai_file_with_a_user_unit_opens_at_its_size_in_points() {
+    let data = ai::editing_data(200.0, 100.0, &ai::layer("Art", &format!("0 1 1 0 1 0 0 Xa\n{}f\n", ai::rect(20.0, 20.0, 60.0, 50.0))));
+    let file = ai::ai_with(&compressed(data.as_bytes()), "1 0 0 rg 20 20 40 30 re f", "/UserUnit 10");
+    let near = |r: vectorcraft_geom::Rect, want: [f64; 4]| [r.x0, r.y0, r.x1, r.y1].iter().zip(want).all(|(a, b)| (a - b).abs() < 0.01);
+    let mut s = Session::new();
+    for (params, layers) in [(json!({}), ["Art"]), (json!({"editingData": false}), ["Page 1"])] {
+        let r = open(&mut s, "large.ai", &file, params.clone()).unwrap();
+        let doc = &s.doc().unwrap().doc;
+        assert_eq!(names(&doc.layers), layers, "{params}: {r}");
+        assert!(near(doc.artboards[0].rect, [0.0, 0.0, 2000.0, 1000.0]), "{params}: {:?}", doc.artboards[0].rect);
+        let art = doc.art_bounds().unwrap();
+        assert!(near(art, [200.0, 500.0, 600.0, 800.0]), "{params}: {art:?}");
+    }
+    let v = s.execute("document.pdfInfo", &json!({"dataBase64": vectorcraft_format::base64_encode(&file)})).unwrap();
+    let page = &v["pageInfo"][0];
+    assert_eq!((page["width"].as_f64(), page["height"].as_f64()), (Some(2000.0), Some(1000.0)), "{v}");
+    assert_eq!(page["boxes"]["media"], json!([0.0, 0.0, 2000.0, 1000.0]), "{v}");
 }
 
 /// A `.ai` of a 200 × 100 pt artboard with a 10 mm bleed: its PDF part's page is the artboard
@@ -298,4 +373,44 @@ fn bled_file_opens_on_its_artboard(name: &str, key: &str) {
     assert_eq!(names(&s.doc().unwrap().doc.layers), ["Page 1"], "{name}: editingData: false reads the PDF part");
     open(&mut s, name, &file, json!({})).unwrap();
     assert_eq!(names(&s.doc().unwrap().doc.layers), ["Art"], "{name}: the editing data's layers are read");
+}
+
+/// The rows that open in the Layers panel (layers, sublayers and groups), and which of them are
+/// open.
+fn open_rows(s: &Session) -> (Vec<String>, Vec<String>) {
+    let st = s.doc().unwrap();
+    let (mut rows, mut open) = (vec![], vec![]);
+    st.doc.walk(|n| {
+        if n.children().is_some() {
+            rows.push(n.name.clone().unwrap_or_default());
+            if st.layers_open.contains(n.id) {
+                open.push(n.name.clone().unwrap_or_default());
+            }
+        }
+    });
+    (rows, open)
+}
+
+/// #1475: a `.ai` another app wrote keeps no open rows VectorCraft reads, so it opens with every
+/// row closed, its top-level layers as its groups; a `.ai` VectorCraft wrote, and other formats,
+/// open as before (with their top-level layers open unless the file says otherwise).
+#[test]
+fn an_illustrator_ai_file_opens_with_its_layers_closed() {
+    let mut s = Session::new();
+    for file in [ai::ai(&compressed(&ai::sample_data()), ai::page_pdf()), ai::eps(&ai::sample_data(), ai::page_ps())] {
+        let r = open(&mut s, "art.ai", &file, json!({})).unwrap();
+        assert_eq!((&r["format"], &r["restored"]), (&json!("ai"), &json!(false)), "{r}");
+        let (rows, open) = open_rows(&s);
+        assert!(rows.contains(&"Art".into()) && rows.contains(&"Pair".into()) && rows.contains(&"Sub".into()), "{rows:?}");
+        assert_eq!(open, Vec::<String>::new(), "{r}");
+    }
+    // The same art as an EPS: its top-level layers open.
+    open(&mut s, "art.eps", &ai::eps(&ai::sample_data(), ai::page_ps()), json!({})).unwrap();
+    assert_eq!(open_rows(&s).1, ["Art", "Hidden"]);
+    // Saved as .ai by VectorCraft, it opens with the rows it was saved with.
+    let saved = s.execute("document.save", &json!({"format": "ai"})).unwrap();
+    let bytes = vectorcraft_format::base64_decode(saved["dataBase64"].as_str().unwrap()).unwrap();
+    let r = open(&mut s, "again.ai", &bytes, json!({})).unwrap();
+    assert_eq!(r["restored"], json!(true), "{r}");
+    assert_eq!(open_rows(&s).1, ["Art", "Hidden"]);
 }

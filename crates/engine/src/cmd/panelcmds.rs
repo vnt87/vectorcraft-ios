@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Character / Paragraph",
             [],
             None,
-            "{ids?|id?, kerning?: 1/1000 em|\"auto\", baselineShift?: pt, hScale?: %, vScale?: %, rotation?: deg, underline?, strikethrough?, allCaps?, smallCaps?: bool, position?: \"normal\"|\"superscript\"|\"subscript\" (sizes from Document Setup), leftIndent?, rightIndent?, firstLineIndent?, spaceBefore?, spaceAfter?: pt (±1296), hyphenate?: bool, mojikumi?: \"none\"|\"lineEndHalf\" (Japanese punctuation spacing), kinsoku?: \"none\"|\"hard\"|\"soft\" (Kinsoku Set: Soft lets 々, ー and small kana start a line), direction?: \"auto\"|\"leftToRight\"|\"rightToLeft\" (paragraph direction; auto: from each paragraph's first strong character), leadingModel?: \"romanBaseline\"|\"emBoxTop\" (leading measured baseline to baseline, or em box top to top), charAlign?: \"romanBaseline\"|\"emBoxTop\"|\"emBoxCenter\"|\"emBoxBottom\"|\"icfTop\"|\"icfBottom\" (where characters smaller than the largest on their line line up with it), proportionalMetrics?: bool (full-width glyphs on the font's proportional widths: `palt` in horizontal type, `vpal` in vertical type), digits?: \"default\"|\"arabic\"|\"hindi\"|\"farsi\" (Character panel menu › Digits: the numeral system every digit is drawn in, whatever was typed), burasagari?: \"none\"|\"standard\"|\"forced\" (Paragraph panel menu › Burasagari None/Regular/Force: an East Asian comma or full stop ending an area type line hangs outside it: when it doesn't fit, or always; new type: \"standard\"), composer?: \"singleLine\"|\"everyLine\" (line breaking, Every-line by default), start?: byte, end?: byte} (baselineShift is in document points and hScale includes the object transform; groups include their text descendants; with a range: the character attributes style that range and the paragraph attributes apply to the paragraphs it touches; without: all the text)",
+            "{ids?|id?, kerning?: 1/1000 em|\"auto\", baselineShift?: pt, hScale?: %, vScale?: %, rotation?: deg, underline?, strikethrough?, allCaps?, smallCaps?: bool, position?: \"normal\"|\"superscript\"|\"subscript\" (sizes from Document Setup), leftIndent?, rightIndent?, firstLineIndent?, spaceBefore?, spaceAfter?: pt (±1296), hyphenate?: bool, wordsLongerThan?: letters 1..25 (5), afterFirst?, beforeLast?: letters 1..15 (3), hyphenLimit?: lines 0..25 (0: no limit), hyphenationZone?: pt 0..1296 (0; Single-line Composer only), hyphenateCapitalized?: bool (true) (Paragraph panel menu › Hyphenation…: only words longer than wordsLongerThan break, keeping afterFirst letters before the hyphen and beforeLast after it; at most hyphenLimit lines in a row end with a hyphen; a line whose text already ends within hyphenationZone of its right edge breaks before the next word instead of hyphenating it; the counts are rounded, and every value is clamped to its range), mojikumi?: \"none\"|\"lineEndHalf\" (Japanese punctuation spacing), kinsoku?: \"none\"|\"hard\"|\"soft\" (Kinsoku Set: Soft lets 々, ー and small kana start a line), direction?: \"auto\"|\"leftToRight\"|\"rightToLeft\" (paragraph direction; auto: from each paragraph's first strong character), leadingModel?: \"romanBaseline\"|\"emBoxTop\" (leading measured baseline to baseline, or em box top to top), charAlign?: \"romanBaseline\"|\"emBoxTop\"|\"emBoxCenter\"|\"emBoxBottom\"|\"icfTop\"|\"icfBottom\" (where characters smaller than the largest on their line line up with it), proportionalMetrics?: bool (full-width glyphs on the font's proportional widths: `palt` in horizontal type, `vpal` in vertical type), digits?: \"default\"|\"arabic\"|\"hindi\"|\"farsi\" (Character panel menu › Digits: the numeral system every digit is drawn in, whatever was typed), burasagari?: \"none\"|\"standard\"|\"forced\" (Paragraph panel menu › Burasagari None/Regular/Force: an East Asian comma or full stop ending an area type line hangs outside it: when it doesn't fit, or always; new type: \"standard\"), composer?: \"singleLine\"|\"everyLine\" (line breaking, Every-line by default), start?: byte, end?: byte} (baselineShift is in document points and hScale includes the object transform; groups include their text descendants; with a range: the character attributes style that range and the paragraph attributes apply to the paragraphs it touches; without: all the text)",
             has_doc,
             set_format
         ),
@@ -54,7 +54,7 @@ pub fn specs() -> Vec<CommandSpec> {
 
 fn artboard_reorder(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "artboard.reorder";
-    let i = p.get("index").and_then(Value::as_u64).ok_or_else(|| bad(C, "missing index"))? as usize;
+    let i = artboard_index(&s.doc()?.doc, p, C)?;
     let to = p.get("to").and_then(Value::as_u64).ok_or_else(|| bad(C, "missing to"))? as usize;
     s.edit("Reorder Artboards", |d, _| {
         if i >= d.artboards.len() {
@@ -70,10 +70,21 @@ fn artboard_reorder(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The artboard (`index`) and whether its art comes along (`art`) for the artboard copy
 /// commands: by default the Artboard tool's artboard and its Move/Copy Artwork with Artboard option.
-fn board_and_art(s: &Session, p: &Value) -> (usize, bool) {
+/// An `index` that names no artboard is an error.
+fn board_and_art(s: &Session, p: &Value, cmd: &str) -> Result<(usize, bool)> {
     let t = s.tool_options_of("artboard");
-    let i = p.get("index").and_then(Value::as_u64).or_else(|| t["active"].as_u64()).unwrap_or(0) as usize;
-    (i, bool_or(p, "art", t["moveArt"].as_bool().unwrap_or(true)))
+    let i = match p.get("index") {
+        Some(_) => artboard_index(&s.doc()?.doc, p, cmd)?,
+        None => t["active"].as_u64().unwrap_or(0) as usize,
+    };
+    Ok((i, bool_or(p, "art", t["moveArt"].as_bool().unwrap_or(true))))
+}
+
+/// The one artboard `cmd` acts on: `index`, an artboard of `d`, with the errors of
+/// [`artboard_indices`] (`missing index`, `no such artboard`).
+pub(crate) fn artboard_index(d: &vectorcraft_doc::Document, p: &Value, cmd: &str) -> Result<usize> {
+    let i = p.get("index").ok_or_else(|| bad(cmd, "missing index"))?;
+    artboard_indices(d, &json!({ "index": i }), cmd)?.into_iter().next().ok_or_else(|| EngineError::Other("no such artboard".into()))
 }
 
 /// The art that goes with artboard `i` when `art`: the objects fully inside it (locked and hidden
@@ -106,7 +117,7 @@ pub(crate) fn beside_artboards(d: &vectorcraft_doc::Document, rect: Rect) -> Vec
 }
 
 fn artboard_duplicate(s: &mut Session, p: &Value) -> Result<Value> {
-    let (i, art) = board_and_art(s, p);
+    let (i, art) = board_and_art(s, p, "artboard.duplicate")?;
     let art = artboard_art(s, i, art)?;
     let sc = Scaling { patterns: super::object::transform_patterns(s, p, &art)?, ..Scaling::default() };
     let (index, ids) = s.edit("Duplicate Artboard", |d, _| {
@@ -119,7 +130,7 @@ fn artboard_duplicate(s: &mut Session, p: &Value) -> Result<Value> {
 /// Artboard Copy / Cut: the artboard and its art onto the clipboard (pasting brings both); a cut
 /// then deletes them.
 pub(crate) fn artboard_copy(s: &mut Session, p: &Value, cut: bool) -> Result<Value> {
-    let (i, art) = board_and_art(s, p);
+    let (i, art) = board_and_art(s, p, if cut { "artboard.cut" } else { "artboard.copy" })?;
     let art = artboard_art(s, i, art)?;
     let st = s.doc()?;
     if cut && st.doc.artboards.len() <= 1 {
@@ -166,7 +177,7 @@ pub(crate) fn copy_artboard(d: &mut vectorcraft_doc::Document, i: usize, dv: Vec
 /// (`<name> copy 2`…) when that is taken → its index.
 pub(crate) fn push_artboard_copy(d: &mut vectorcraft_doc::Document, src: &vectorcraft_doc::Artboard, rect: Rect) -> usize {
     let mut a = src.clone();
-    a.id = d.artboards.iter().map(|a| a.id).max().unwrap_or(0).saturating_add(1);
+    a.id = d.next_artboard_id();
     let taken = |name: &str| d.artboards.iter().any(|a| a.name == name);
     a.name = [src.name.clone(), format!("{} copy", src.name)]
         .into_iter()
@@ -210,6 +221,12 @@ fn set_format(s: &mut Session, p: &Value) -> Result<Value> {
         "spaceBefore",
         "spaceAfter",
         "hyphenate",
+        "wordsLongerThan",
+        "afterFirst",
+        "beforeLast",
+        "hyphenLimit",
+        "hyphenationZone",
+        "hyphenateCapitalized",
         "mojikumi",
         "kinsoku",
         "direction",
@@ -345,6 +362,25 @@ fn set_format(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 if let Some(v) = flag("hyphenate") {
                     para.hyphenate = v;
+                }
+                let letters = |k: &str, lo: f64, hi: f64| num(k).map(|v| v.round().clamp(lo, hi) as u32);
+                if let Some(v) = letters("wordsLongerThan", 1.0, 25.0) {
+                    para.hyphenation.words_longer_than = v;
+                }
+                if let Some(v) = letters("afterFirst", 1.0, 15.0) {
+                    para.hyphenation.after_first = v;
+                }
+                if let Some(v) = letters("beforeLast", 1.0, 15.0) {
+                    para.hyphenation.before_last = v;
+                }
+                if let Some(v) = letters("hyphenLimit", 0.0, 25.0) {
+                    para.hyphenation.hyphen_limit = v;
+                }
+                if let Some(v) = num("hyphenationZone") {
+                    para.hyphenation.zone = v.clamp(0.0, MAX_PARA);
+                }
+                if let Some(v) = flag("hyphenateCapitalized") {
+                    para.hyphenation.capitalized = v;
                 }
                 if let Some(v) = mojikumi {
                     para.mojikumi = v;

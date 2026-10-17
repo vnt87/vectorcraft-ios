@@ -170,6 +170,8 @@ pub(crate) fn effects_scale(doc: &Document) -> f64 {
 /// fills' and strokes' raster effects included). With `knockout`, the coverage of that art is knocked out
 /// of the image, which then only holds what the effects add around it (a shadow to go under the
 /// vector object). The document's raster effects settings add room around it and finish its pixels.
+/// `None` when it paints nothing, when the area it covers overflows `f64` or the scale is not
+/// positive, or when its PNG can't be encoded.
 pub(crate) fn effect_image(out: &mut Document, whole: &Node, knockout: Option<&Node>, scale: f64) -> Option<Node> {
     // What it paints (its members' effects included), and how far its fills' and strokes' raster
     // effects reach beyond that.
@@ -177,8 +179,16 @@ pub(crate) fn effect_image(out: &mut Document, whole: &Node, knockout: Option<&N
     let look = out.raster_effects.clone();
     let reach = whole.appearance.items.iter().map(|i| effects::outset(i.effects(), b)).fold(0.0, f64::max) + 2.0 + look.add_around;
     let b = b.inflate(reach, reach);
+    // An area too large for f64 gives a zero scale and an image transform that is not finite.
+    let area = b.width() * b.height();
+    if !area.is_finite() {
+        return None;
+    }
     // Whole pixels, and no larger than 64 Mpx.
-    let scale = scale.min((64.0e6 / (b.width() * b.height()).max(1.0)).sqrt());
+    let scale = scale.min((64.0e6 / area.max(1.0)).sqrt());
+    if !(scale.is_finite() && scale > 0.0) {
+        return None;
+    }
     let region = Rect::new(b.x0, b.y0, b.x0 + (b.width() * scale).ceil().max(1.0) / scale, b.y0 + (b.height() * scale).ceil().max(1.0) / scale);
     // Anti-alias off: hard edges (the effects themselves stay smooth).
     let anti_alias = if look.anti_alias { AntiAlias::Art } else { AntiAlias::None };

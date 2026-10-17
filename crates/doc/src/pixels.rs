@@ -16,7 +16,7 @@ pub const MAX_RASTER_ALLOC: u64 = if cfg!(target_arch = "wasm32") { 512 << 20 } 
 /// is on the file's samples, and a grey image is a quarter of what it becomes here (#1717).
 fn rgba_within(bytes: &[u8], max: u64) -> Option<image::RgbaImage> {
     let (w, h) = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
-    if u64::from(w) * u64::from(h) * 4 > max {
+    if u64::from(w) * u64::from(h) > max / 4 {
         return None;
     }
     Some(image::load_from_memory(bytes).ok()?.to_rgba8())
@@ -141,6 +141,38 @@ mod tests {
         assert!(rgba_within(&png, 31).is_none(), "8 grey bytes are 32 as RGBA");
         assert_eq!(rgba_within(&png, 32).map(|i| i.dimensions()), Some((4, 2)));
         assert!(rgba_within(b"not an image", u64::MAX).is_none());
+    }
+
+    /// A little-endian TIFF whose header gives `w` × `h` 8-bit gray pixels in one strip. The file holds
+    /// no pixel data.
+    fn tiff_header(w: u32, h: u32) -> Vec<u8> {
+        let mut out = b"II*\0".to_vec();
+        out.extend(8u32.to_le_bytes());
+        // Each entry is (tag, type: 3 SHORT or 4 LONG, value) and holds one value.
+        let entries: [(u16, u16, u32); 9] =
+            [(256, 4, w), (257, 4, h), (258, 3, 8), (259, 3, 1), (262, 3, 1), (273, 4, 8), (277, 3, 1), (278, 4, h), (279, 4, 0)];
+        out.extend((entries.len() as u16).to_le_bytes());
+        for (tag, kind, value) in entries {
+            out.extend(tag.to_le_bytes());
+            out.extend(kind.to_le_bytes());
+            out.extend(1u32.to_le_bytes());
+            out.extend(value.to_le_bytes());
+        }
+        out.extend(0u32.to_le_bytes());
+        out
+    }
+
+    /// A TIFF's sides go up to 2^32 - 1 pixels: a size whose RGBA bytes don't fit in 64 bits is
+    /// refused like any other past the allowance, and an image within the allowance still decodes.
+    #[test]
+    fn a_size_past_64_bits_as_rgba_is_not_decoded() {
+        let huge = tiff_header(1 << 31, 1 << 31);
+        assert!(rgba_within(&huge, MAX_RASTER_ALLOC).is_none());
+        assert!(rgba_within(&huge, u64::MAX).is_none());
+        let gray = image::GrayImage::from_raw(4, 2, vec![7; 8]).unwrap();
+        let mut png = Vec::new();
+        gray.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        assert_eq!(rgba_within(&png, 35).map(|i| i.dimensions()), Some((4, 2)), "32 bytes as RGBA, within 35");
     }
 
     #[test]

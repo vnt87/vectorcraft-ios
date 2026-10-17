@@ -19,7 +19,7 @@ fn place_embedded(s: &mut Session, path: &str) -> NodeId {
 
 /// A PNG that says it is `w` × `h` 1-bit grey pixels (its header and no rows, which is all that
 /// placing and listing read).
-fn png_header(w: u32, h: u32) -> Vec<u8> {
+pub(crate) fn png_header(w: u32, h: u32) -> Vec<u8> {
     let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
     let ihdr: Vec<u8> = [&b"IHDR"[..], &w.to_be_bytes(), &h.to_be_bytes(), &[1, 0, 0, 0, 0]].concat();
     for chunk in [&ihdr[..], b"IDAT\x78\x9c", b"IEND"] {

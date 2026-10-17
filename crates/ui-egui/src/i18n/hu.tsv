@@ -327,7 +327,6 @@
 	Art using a deleted global swatch keeps its colour.	A törölt globális színmintát használó grafika megtartja a színét.
 	Artboard	Rajztábla
 	Artboard Options	Rajztábla beállításai
-	Artboard Options: edit with the Artboard tool	Rajztábla beállításai: szerkesztés a Rajztábla eszközzel
 	Artboard Options…	Rajztábla beállításai…
 	Artboard Tool	Rajztábla
 	Artboard {number}	Rajztábla {number}
@@ -425,6 +424,7 @@
 	Blocks	Kockák
 	Blue	Kék
 	Blur	Elmosás
+	Blur Mode	Elmosási mód
 	Bold	Félkövér
 	Border Thickness	Szegélyvastagság
 	Bottom	Alsó
@@ -657,6 +657,7 @@
 	Color bars	Színsávok
 	Color blindness – Deuteranopia-type	Színvakság – deuteranópia
 	Color blindness – Protanopia-type	Színvakság – protanópia
+	Color blindness – Tritanopia-type	Színvakság – tritanópia
 	Color Burn	Színsötétítés
 	Color conversion:	Színátalakítás:
 	Color Dodge	Színvilágosítás
@@ -764,6 +765,7 @@
 	Convert to RGB	Átalakítás RGB-re
 	Convert to Shape	Átalakítás alakzattá
 	Convert to sRGB	Átalakítás sRGB-re
+	Convert to Straight Lines	Átalakítás egyenes vonalakká
 	Convert:	Átalakítás:
 	Cool	Hideg
 	Copied the CSS of {rules} object(s)	CSS másolva, objektumok: {rules}
@@ -788,6 +790,7 @@
 	Copyright Symbol	Szerzői jogi jel
 	Copyrighted	Szerzői jogvédett
 	Corner	Sarok
+	Corner Point Angle Threshold:	Sarokpontok szögküszöbe:
 	Corner Radius	Sarokkerekítés sugara
 	Corner Radius:	Sarokkerekítés sugara:
 	Corner:	Sarok:
@@ -867,6 +870,7 @@
 	Dark Strokes	Sötét vonások
 	Dark Strokes…	Sötét vonások…
 	Darken	Sötétítés
+	Darkness	Sötétség
 	dash	vonal
 	Dash Pattern	Szaggatás mintázata
 	Dashed	Szaggatott
@@ -882,6 +886,7 @@
 	Decimal:	Tizedesjegyek:
 	Decorative	Díszítő
 	Decrease Font Size	Betűméret csökkentése
+	Decrease Font Size by Five Steps	Betűméret csökkentése öt lépéssel
 	Default	Alapértelmezett
 	Default Actions	Alapértelmezett műveletek
 	Default Figure	Alapértelmezett számjegyek
@@ -1111,6 +1116,7 @@
 	East Asian Type	Kelet-ázsiai szöveg
 	Edge	Él
 	Edge Brightness	Él fényessége
+	Edge Only	Csak élek
 	Edge Width	Élszélesség
 	Edit	Szerkesztés
 	Edit Artboards	Rajztáblák szerkesztése
@@ -1250,6 +1256,32 @@
 	Export All…	Összes exportálása…
 	Export and Clipboard Transparency Flattener Settings	Átlátszóság lapítása exportáláskor és vágólapra másoláskor
 	Export Artboard	Rajztábla exportálása
+	A File per Object	Objektumonként egy fájl
+	Example: {name}	Példa: {name}
+	Export Preset:	Exportálási előbeállítás:
+	Folders:	Mappák:
+	Insert	Beszúrás
+	Nothing is selected. Select the art to export, then open this tab again.	Nincs kijelölés. Jelölje ki az exportálandó grafikát, majd nyissa meg újra ezt a lapot.
+	One File of the Selection	Egy fájl a kijelölésből
+	Start at:	Kezdőérték:
+	{n} objects selected	{n} objektum kijelölve
+	Delete Export Preset	Exportálási előbeállítás törlése
+	Export Presets	Exportálási előbeállítások
+	Save Export Preset	Exportálási előbeállítás mentése
+	Export Layer	Réteg exportálása
+	Export Selection	Kijelölés exportálása
+	All in One Folder	Mind egy mappába
+	By Size or Row	Méret vagy sor szerint
+	By Format	Formátum szerint
+	By Artboard or Item	Rajztábla vagy elem szerint
+	By Item, Then Format	Elem, majd formátum szerint
+	Document Name	Dokumentum neve
+	Artboard or Item Name	Rajztábla vagy elem neve
+	Number (####)	Szám (####)
+	Date (YYYYMMDD)	Dátum (ÉÉÉÉHHNN)
+	Date (YYYY-MM-DD)	Dátum (ÉÉÉÉ-HH-NN)
+	Time (hhmmss)	Idő (óóppmm)
+	PDF Print	Nyomdai PDF
 	Export As	Exportálás másként
 	Export As PNG…	Exportálás PNG-ként…
 	Export As SVG…	Exportálás SVG-ként…
@@ -1289,6 +1321,9 @@
 	Export…	Exportálás…
 	Extrude & Bevel…	Kihúzás és élletörés…
 	Eyedropper	Pipetta
+	Sample Color from Screen	Szín mintavétele a képernyőről
+	This system has no screen color sampler	Ezen a rendszeren nincs képernyős színmintavevő
+	The active document changed while the screen color sampler was open	Az aktív dokumentum megváltozott, amíg a képernyős színmintavevő nyitva volt
 	Eyedropper Applies:	A pipetta alkalmazza:
 	Eyedropper Options	Pipetta beállításai
 	Eyedropper Picks Up:	A pipetta felveszi:
@@ -1323,6 +1358,8 @@
 	Fill and Stroke	Kitöltés és körvonal
 	Fill Color	Kitöltőszín
 	Fill new strokes	Új vonások kitöltése
+	Keep selected	Kijelölés megtartása
+	Merge only with selection	Összeolvasztás csak a kijelöléssel
 	Fill New Type Objects With Placeholder Text	Új szövegobjektumok kitöltése helykitöltő szöveggel
 	Fill Rule	Kitöltési szabály
 	Fill with Placeholder Text	Kitöltés helykitöltő szöveggel
@@ -1605,6 +1642,7 @@
 	Hide Print Tiling	Nyomtatási csempézés elrejtése
 	Hide Rulers	Vonalzók elrejtése
 	Hide Slices	Szeletek elrejtése
+	Hide Template	Sablon elrejtése
 	Hide Text Threads	Szövegláncok elrejtése
 	Hide Thumbnail	Bélyegkép elrejtése
 	Hide Thumbnails	Bélyegképek elrejtése
@@ -1656,6 +1694,14 @@
 	Hyphenate	Elválasztás
 	Hyphenation	Elválasztás
 	Hyphenation…	Elválasztás…
+	Words Longer Than:	Ennél hosszabb szavak:
+	After First:	Az első után:
+	Before Last:	Az utolsó előtt:
+	Hyphen Limit:	Kötőjelek korlátja:
+	Hyphenation Zone:	Elválasztási zóna:
+	letters	betű
+	hyphens	kötőjel
+	Hyphenate Capitalized Words	Nagybetűs szavak elválasztása
 	ICC Profile	ICC-profil
 	ICF Bottom/Left	ICF alja/bal oldala
 	ICF Top/Right	ICF teteje/jobb oldala
@@ -1708,6 +1754,7 @@
 	Include Swatches for Tints	Tónusok színmintáinak felvétele
 	Include tagged source profiles	Címkézett forrásprofilok beágyazása
 	Increase Font Size	Betűméret növelése
+	Increase Font Size by Five Steps	Betűméret növelése öt lépéssel
 	Inflate…	Felfújás…
 	Info	Infó
 	Ink	Festék
@@ -1737,6 +1784,8 @@
 	Internet Standard RGB (sRGB)	Internetes szabványos RGB (sRGB)
 	Interpolation	Interpoláció
 	Intersect	Metszet
+	Intertwine	Összefonás
+	Arrange Intertwine Area	Összefonási terület elrendezése
 	Inverse	Kijelölés megfordítása
 	Invert	Invertálás
 	Invert Colors	Színek invertálása
@@ -1747,6 +1796,7 @@
 	Isolate Blending	Keverés elkülönítése
 	Isolate Group	Csoport elkülönítése
 	Isolate Selected Group	Kijelölt csoport elkülönítése
+	Isolate Selected Object	Kijelölt objektum elkülönítése
 	Italian	Olasz
 	Italic	Dőlt
 	Its graphics, colors and text styles are deleted from this machine.	A grafikái, színei és szövegstílusai törlődnek erről a gépről.
@@ -1876,6 +1926,20 @@
 	Left:	Bal:
 	Legacy Macintosh RGB (Gamma 1.8)	Régi Macintosh RGB (gamma 1,8)
 	Legacy vector clipboard	Régi vektoros vágólap
+	Legacy (version 7)	Régi (7-as verzió)
+	Transparent Images:	Átlátszó képek:
+	Flatten	Egyesítés
+	Omit	Kihagyás
+	Legacy .ai Options	Régi .ai beállításai
+	A legacy .ai file holds one artboard: each artboard you check is saved as a separate file.	A régi .ai fájl egy rajztáblát tartalmaz: minden bejelölt rajztábla külön fájlba kerül.
+	{count} of {total} artboards	{count} / {total} rajztábla
+	Check an artboard to save.	Jelöljön be egy mentendő rajztáblát.
+	Hidden Objects:	Rejtett objektumok:
+	Hidden Layer	Rejtett réteg
+	Make Visible	Láthatóvá tétel
+	Text:	Szöveg:
+	Editable	Szerkeszthető
+	PDF-compatible	PDF-kompatibilis
 	Legacy vector clipboard (no transparency)	Régi vektoros vágólap (átlátszóság nélkül)
 	Legal	Legal
 	Length:	Hossz:
@@ -1962,6 +2026,8 @@
 	Load Profile…	Profil betöltése…
 	Load SVG into Clipboard	SVG betöltése a vágólapra
 	Load Text into Clipboard	Szöveg betöltése a vágólapra
+	Load Texture…	Textúra betöltése…
+	Loaded Texture	Betöltött textúra
 	Local Libraries	Helyi könyvtárak
 	Locate Object	Objektum megkeresése
 	Location	Hely
@@ -2090,6 +2156,7 @@
 	Mixed Appearances	Vegyes megjelenések
 	Mixed Objects	Vegyes objektumok
 	Mobile	Mobil
+	Mode	Mód
 	Mode:	Mód:
 	Model	Modell
 	Models	Modellek
@@ -2403,6 +2470,7 @@
 	Outer Corner Tile	Külső sarokcsempe
 	Outer Glow…	Külső ragyogás…
 	Outline	Vázlat
+	Outline Object	Objektum útvonallá alakítása
 	Outline Others	Többi vázlatnézetben
 	Outline Stroke	Körvonal útvonallá alakítása
 	Outline Text	Szöveg útvonallá alakítása
@@ -2425,6 +2493,7 @@
 	Overlap:	Átfedés:
 	Overlapping	Átfedő
 	Overlay	Átfedés
+	Overlay Edge	Élek átfedése
 	Overprint	Felülnyomás
 	Overprint and Transparency Flattener	Felülnyomás és átlátszóság-lapítás
 	Overprint and Transparency Flattener Options	Felülnyomás és átlátszóság-lapítás beállításai
@@ -2455,6 +2524,7 @@
 	Panel menu	Panelmenü
 	Panel Options…	Panel beállításai…
 	Panels	Panelek
+	Panels Except Tools and Control	Panelek az Eszközök és a Vezérlősáv kivételével
 	Paragraph	Bekezdés
 	Paragraph Style	Bekezdésstílus
 	Paragraph Style Options	Bekezdésstílus beállításai
@@ -2483,6 +2553,7 @@
 	Pathfinder Options…	Útvonalkezelő beállításai…
 	Pathfinders:	Útvonalkezelők:
 	Paths	Útvonalak
+	Path Length	Útvonalak hossza
 	Paths: {paths}    Anchors: {anchors}    Colors: {colors}	Útvonalak: {paths}    Horgonypontok: {anchors}    Színek: {colors}
 	Pattern	Mintázat
 	Pattern Brush Options	Mintázatecset beállításai
@@ -2876,6 +2947,7 @@
 	Reset Envelope Shape	Burkoló alakjának visszaállítása
 	Reset Essentials	Essentials visszaállítása
 	Reset Essentials Classic	Essentials Classic visszaállítása
+	Reset Horizontal Scale	Vízszintes méretezés visszaállítása
 	Reset Keyboard Shortcuts	Billentyűparancsok visszaállítása
 	Reset Layout	Layout visszaállítása
 	Reset OpenType Features	OpenType-funkciók visszaállítása
@@ -2885,12 +2957,14 @@
 	Reset Printing and Proofing	Printing and Proofing visszaállítása
 	Reset Profiles	Profilok visszaállítása
 	Reset Rotate View	Nézetforgatás visszaállítása
+	Rotate View to Selection	Nézet elforgatása a kijelöléshez
 	Reset the rows to the artwork's colors	Sorok visszaállítása a grafika színeire
 	Reset to default	Alapérték visszaállítása
 	Reset to Default	Alapérték visszaállítása
 	Reset to Defaults	Alapértékek visszaállítása
 	Reset to White, Black	Visszaállítás fehér–fekete átmenetre
 	Reset Tracing	Tracing visszaállítása
+	Reset Tracking and Kerning	Betűköz és alávágás visszaállítása
 	Reset Typography	Typography visszaállítása
 	Reset Web	Web visszaállítása
 	Reset with Mesh	Visszaállítás hálóval
@@ -3032,6 +3106,7 @@
 	Save selected colors as swatches	Kijelölt színek mentése színmintaként
 	Save Selection	Kijelölés mentése
 	Save Selection…	Kijelölés mentése…
+	Update Selection	Kijelölés frissítése
 	Save Swatch Library	Színminta-könyvtár mentése
 	Save Swatch Library…	Színminta-könyvtár mentése…
 	Save the current layout under this name	Az aktuális elrendezés mentése ezen a néven
@@ -3132,6 +3207,17 @@
 	Scrub Numeric Fields by Dragging	Számmezők állítása húzással
 	Search	Keresés
 	Search All	Keresés mindenben
+	Filter	Szűrő
+	Clear All	Összes törlése
+	By Object	Objektum szerint
+	By Layer	Réteg szerint
+	Images	Képek
+	Groups	Csoportok
+	Linked Files	Csatolt fájlok
+	Locked	Zárolt
+	Hidden	Rejtett
+	Filter Layers Panel Rows	Rétegek panel sorainak szűrése
+@msg	`{key}` must be an array of these names: {_1}	`{key}`: ezen nevek tömbje kell: {_1}
 	Search commands and tools	Parancsok és eszközök keresése
 	Search commands and tools…	Parancsok és eszközök keresése…
 	Search Commands…	Parancsok keresése…
@@ -3298,6 +3384,8 @@
 	Show Modified	Módosultak megjelenítése
 	Show Note	Megjegyzés megjelenítése
 	Show Options	Beállítások megjelenítése
+	Show Original Path	Eredeti útvonal megjelenítése
+	Color Panel Options	Szín panel beállításai
 	Show Package	Csomag megjelenítése
 	Show Panel	Panel megjelenítése
 	Show Pattern Swatches	Mintázat-színminták megjelenítése
@@ -3311,6 +3399,7 @@
 	Show Slices	Szeletek megjelenítése
 	Show Swatch Bounds	Színminta határainak megjelenítése
 	Show Swatch Kinds	Színmintafajták megjelenítése
+	Show Template	Sablon megjelenítése
 	Show Text Threads	Szövegláncok megjelenítése
 	Show The Home Screen When No Documents Are Open	Kezdőképernyő megjelenítése, ha nincs nyitott dokumentum
 	Show Thumbnail	Bélyegkép megjelenítése
@@ -3603,6 +3692,7 @@
 	Text Wrap Options	Körbefuttatás beállításai
 	Text Wrap Options…	Körbefuttatás beállításai…
 	Texture	Textúra
+	Texture Image	Textúrakép
 	Texturizer	Textúrázó
 	Texturizer…	Textúrázó…
 	Thai	Thai
@@ -4076,6 +4166,7 @@ imageTrace	Outline	Körvonal
 @msg	`{key}` must be between {min} and {max} (got {x})	`{key}`: {min} és {max} közötti érték kell (kapott érték: {x})
 @msg	`{key}` must be one of {_1}	`{key}`: ezek egyike kell: {_1}
 @msg	`{key}` must be true or false	`{key}`: true vagy false kell
+@msg	`mode` must be grayscale, rgb, hsb, cmyk or websafe	`mode`: grayscale, rgb, hsb, cmyk vagy websafe kell
 @msg	`{k}` must be [x, y]	`{k}`: [x, y] kell
 @msg	`{name}` has no options	ennek nincsenek beállításai: `{name}`
 @msg	`{name}` is a built-in workspace; choose another name	beépített munkaterület: `{name}`; válassz másik nevet
@@ -4143,6 +4234,9 @@ imageTrace	Outline	Körvonal
 @msg	axis must be "vertical", "horizontal" or an angle in degrees, not `{v}`	az axis értéke "vertical", "horizontal" vagy fokban megadott szög lehet, ez nem az: `{v}`
 @msg	background {other}: transparent, white, black or a colour such as "#ff8800"	background {other}: transparent, white, black vagy egy szín, például "#ff8800"
 @msg	bad color {v}	hibás szín: {v}
+@msg	the Color Picker is not open	a Színválasztó nincs megnyitva
+@msg	the screen color sampler is already open	a képernyős színmintavevő már nyitva van
+@msg	this system has no screen color sampler	ezen a rendszeren nincs képernyős színmintavevő
 @msg	bad colour `{hex}` (#rrggbb)	hibás szín: `{hex}` (#rrggbb)
 @msg	bad page tree	hibás oldalfa
 @msg	bad shortcut	hibás billentyűparancs
@@ -4164,6 +4258,8 @@ imageTrace	Outline	Körvonal
 @msg	cannot read PDF: {0}	a PDF nem olvasható: {0}
 @msg	cannot split an open path at its end point	nyitott útvonal a végpontjánál nem vágható ketté
 @msg	check an asset to export	jelölj be egy exportálandó elemet
+@msg	check a layer to export	jelöljön be egy exportálandó réteget
+@msg	select the art to export first	először jelölje ki az exportálandó grafikát
 @msg	choice must be "merge" or "add", not `{choice}`	a choice értéke "merge" vagy "add" lehet, ez nem az: `{choice}`
 @msg	choose a direction to divide in	válaszd ki a felosztás irányát
 @msg	choose a folder to export to	válaszd ki az exportálás célmappáját
@@ -4367,6 +4463,7 @@ imageTrace	Outline	Körvonal
 @msg	no saved presets	nincs mentett előbeállítás
 @msg	no saved print preset named `{name}` ({DEFAULT_PRESET} is protected: start a new one from it)	nincs ilyen nevű mentett nyomtatási előbeállítás: `{name}` (védett: {DEFAULT_PRESET}; új előbeállítást indíthatsz belőle)
 @msg	no saved profiles	nincs mentett profil
+@msg	no saved selection recalled	nincs visszahívott mentett kijelölés
 @msg	no saved selections	nincs mentett kijelölés
 @msg	No saved selections (Select → Save Selection…)	Nincs mentett kijelölés (Kijelölés → Kijelölés mentése…)
 @msg	no saved themes	nincs mentett téma
@@ -4500,6 +4597,7 @@ imageTrace	Outline	Körvonal
 @msg	select a linked image: an embedded one has no file	jelölj ki egy csatolt képet: a beágyazottnak nincs fájlja
 @msg	select a Live Paint group	jelölj ki egy élőfestés-csoportot
 @msg	select a repeat	jelölj ki egy ismétlést
+@msg	select an Intertwine group	jelölj ki egy összefonási csoportot
 @msg	select a stroke with a variable width	jelölj ki egy változó szélességű körvonalat
 @msg	select a symbol instance	jelölj ki egy szimbólumpéldányt
 @msg	select an envelope	jelölj ki egy burkolót
@@ -4542,6 +4640,8 @@ imageTrace	Outline	Körvonal
 @msg	the art is too light for any dots	a grafika túl világos, egyetlen raszterpont sem keletkezik
 @msg	the art on them differs from the page's in {_1}% of it	a rajtuk lévő grafika az oldalétól ennyiben tér el: {_1}%
 @msg	the art on them differs from the page's in {_1}% of it: they come from its editing data all the same	a rajtuk lévő grafika az oldalétól ennyiben tér el: {_1}%; ennek ellenére a szerkesztési adataiból származnak
+@msg	the file's layers weren't read ({_1}): it comes in as its page, in one layer	a fájl rétegei nem olvashatók ({_1}): az oldalaként, egyetlen rétegben nyílik meg
+@msg	the file's layers weren't read from its editing data ({_1}): they come from its PDF part	a fájl rétegei nem olvashatók a szerkesztési adataiból ({_1}): a PDF-részéből származnak
 @msg	the artboard to fit must be a positive size up to {_1} pt	az illesztendő rajztábla mérete pozitív, legfeljebb {_1} pt lehet
 @msg	the background worker stopped	a háttérfolyamat leállt
 @msg	the compressed file unpacks to more than {_1} MB	a tömörített fájl kicsomagolva nagyobb lenne, mint {_1} MB
@@ -4564,6 +4664,8 @@ imageTrace	Outline	Körvonal
 @msg	the file's preview header points outside the file	a fájl előnézeti fejléce a fájlon kívülre mutat
 @msg	the files come to more than 1 GB: add fewer at a time	a fájlok együtt nagyobbak 1 GB-nál: egyszerre kevesebbet adj hozzá
 @msg	The graphics processor tried first couldn't show the window, so VectorCraft started again on {summary}	Az először kipróbált grafikus processzor nem tudta megjeleníteni az ablakot, ezért a VectorCraft újraindult ezen: {summary}
+@msg	The last start of VectorCraft ended on {name} before its window appeared, so it started on {summary}. To try that graphics processor again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A VectorCraft legutóbbi indítása még az ablak megjelenése előtt véget ért ezen: {name}, ezért most ezen indult el: {summary}. Ha újra ki szeretnéd próbálni ezt a grafikus processzort, módosítsd a Beállítások › Teljesítmény › Grafikus processzor értékét, vagy indítsd a WGPU_BACKEND változó beállításával
+@msg	The last start of VectorCraft ended while it listed the graphics processors, so it started on {summary} with OpenGL alone. To try the other graphics backends again, change Preferences › Performance › Graphics Processor or start with WGPU_BACKEND set	A VectorCraft legutóbbi indítása a grafikus processzorok listázása közben ért véget, ezért most csak OpenGL-lel indult el ezen: {summary}. Ha újra ki szeretnéd próbálni a többi grafikus felületet, módosítsd a Beállítások › Teljesítmény › Grafikus processzor értékét, vagy indítsd a WGPU_BACKEND változó beállításával
 @msg	The graphics were lost and couldn't be restarted.	A grafikus megjelenítés megszakadt, és nem sikerült újraindítani.
 @msg	The graphics were lost and have been restarted	A grafikus megjelenítés megszakadt, és újraindult
 @msg	the guide is on a hidden or locked layer	a segédvonal rejtett vagy zárolt rétegen van
@@ -4613,7 +4715,7 @@ imageTrace	Outline	Körvonal
 @msg	this file's PostScript couldn't be read ({why}): {what}	a fájl PostScript-tartalma nem olvasható ({why}): {what}
 @msg	this format holds one artboard: export several as PDF or with document.exportForScreens	ez a formátum egy rajztáblát tárol: többet PDF-ként vagy a document.exportForScreens paranccsal exportálj
 @msg	this is a DWG drawing, which can't be read: save it from the CAD app as an ASCII DXF and open that	ez DWG-rajz, amely nem olvasható: mentsd ASCII DXF-ként a CAD-alkalmazásból, és azt nyisd meg
-@msg	this is a PostScript file (an .ai saved in an older format or without PDF compatibility, or an EPS file), which can't be opened yet: save it as PDF, PDF-compatible .ai or SVG	ez PostScript-fájl (régebbi formátumban vagy PDF-kompatibilitás nélkül mentett .ai, illetve EPS), amely még nem nyitható meg: mentsd PDF-ként, PDF-kompatibilis .ai-ként vagy SVG-ként
+@msg	this is a PostScript file (an .ai saved in an older format or without PDF compatibility, or an EPS file), not a PDF: File › Open and File › Place read it as EPS	ez PostScript-fájl (régebbi formátumban vagy PDF-kompatibilitás nélkül mentett .ai, illetve EPS), nem PDF: a Fájl › Megnyitás és a Fájl › Elhelyezés EPS-ként olvassa be
 @msg	this is not a PostScript file	ez nem PostScript-fájl
 @msg	this isn't a flat-colour logo ({_1}% of its solid areas match a few flat colours), so Flat Logo mode would turn its gradients into patches: use Color mode instead	ez nem egyszínű logó (az egyszínű területeinek csak ennyi része illik néhány alapszínhez: {_1}%), így az Egyszínű logó mód foltokká alakítaná a színátmeneteit: használd inkább a Színes módot
 @msg	this kind of brush has no options dialog yet	ennek az ecsetfajtának még nincs beállítási párbeszédablaka
@@ -4750,6 +4852,7 @@ imageTrace	Outline	Körvonal
 @msg	unknown parameter `{key}`; the command takes: {keys}	ismeretlen paraméter: `{key}`; a parancs ezeket fogadja el: {keys}
 	Load EPS into Clipboard	EPS betöltése a vágólapra
 @msg	an image of {w} × {h} pixels is too large to draw	egy {w} × {h} pixeles kép túl nagy a kirajzoláshoz
+@msg	the image can't be read as a texture	a kép nem olvasható be textúraként
 	Fill and Stroke Controls	Kitöltés és körvonal vezérlői
 	Coloring Controls	Színezés vezérlői
 	Draw Mode Controls	Rajzolási mód vezérlői
@@ -4771,3 +4874,91 @@ imageTrace	Outline	Körvonal
 	Softness	Lágyság
 	Ambient Light	Környezeti fény
 	Light behind the object	Fény az objektum mögött
+	Registration:	Regisztráció:
+# Dimension tool and Object › Dimensions (dimension groups, their dialog and messages).
+	Dimension	Méret
+	Drawing : real size — 1:10 labels 1 unit on the page as 10.	Rajz : valós méret — 1:10 esetén az oldalon 1 egység 10-ként jelenik meg.
+	Preview (1 inch on the page)	Előnézet (1 hüvelyk az oldalon)
+	Set as Default	Beállítás alapértelmezettként
+	 out from a highlighted edge to place its dimension  |  	 egy kiemelt élről kifelé a méret elhelyezéséhez  |  
+	 cancels  |  Double-click the tool for options	 megszakítja  |  Dupla kattintás az eszközre a beállításokhoz
+	Angular	Szög
+	Away from the Line	A vonaltól távol
+	Between Line and Object	A vonal és az objektum között
+	Drag out from a segment, or click two points, then click to place.	Húzzon kifelé egy szakaszról, vagy kattintson két pontra, majd kattintson az elhelyezéshez.
+	Drag out from a corner, or click two straight lines, then click to place.	Húzzon kifelé egy sarokról, vagy kattintson két egyenes vonalra, majd kattintson az elhelyezéshez.
+	Drag out from a circle or arc for its radius, inwards for its diameter.	Húzzon egy körről vagy ívről kifelé a sugárhoz, befelé az átmérőhöz.
+@msg	Choose a circle or a perfect arc	Válasszon egy kört vagy egy tökéletes ívet
+@msg	Choose a precision from 0 to 6	Válasszon 0 és 6 közötti pontosságot
+	Create Dimension	Méretvonal létrehozása
+	Dimension Tool	Méretezés eszköz
+	Dimension Tool Options	Méretezés eszköz beállításai
+	Display	Megjelenítés
+	Font Family:	Betűcsalád:
+	Font Style:	Betűstílus:
+	Precision:	Pontosság:
+	Update Dimensions	Méretek frissítése
+@msg	Angles require two straight segments	A szöghöz két egyenes szakasz kell
+@msg	Choose two different points	Válassz két különböző pontot
+@msg	Choose two non-parallel straight segments	Válassz két nem párhuzamos egyenes szakaszt
+@msg	Choose two nonzero angle arms	Válassz két nem nulla hosszúságú szögszárat
+@msg	Dimension point is outside the canvas	A méretvonal pontja a vásznon kívül esik
+@msg	Dimension size is outside its supported range	A méret a támogatott tartományon kívül esik
+@msg	First measured segment no longer exists	Az első mért szakasz már nem létezik
+@msg	Invalid dimension distance	Érvénytelen méretezési távolság
+@msg	Invalid dimension font name	Érvénytelen méretezési betűtípusnév
+@msg	Invalid drawing scale	Érvénytelen rajzlépték
+@msg	Invalid real scale	Érvénytelen valós lépték
+@msg	Measured anchor no longer exists	A mért horgonypont már nem létezik
+@msg	Measured segment no longer exists	A mért szakasz már nem létezik
+@msg	Non-finite dimension	Nem véges méret
+@msg	Scale must be drawing:real, for example 1:10	A léptéknek rajz:valós alakúnak kell lennie, például 1:10
+@msg	Scale ratio must be between 1:1000000 and 1000000:1	A lépték aránya 1:1000000 és 1000000:1 között lehet
+@msg	Second measured segment no longer exists	A második mért szakasz már nem létezik
+@msg	Unknown dimension mode	Ismeretlen méretezési mód
+@msg	Unknown dimension option {k}	Ismeretlen méretezési beállítás: {k}
+@msg	Unknown dimension style	Ismeretlen méretezési stílus
+@msg	Unknown unit	Ismeretlen mértékegység
+# Revolve cap description
+	Close the circular ends of open profiles. Partial sweeps keep their cut sides open.	Nyitott profilok kör alakú végeinek lezárása. Részleges körforgatás esetén a vágott oldalak nyitva maradnak.
+	Distance	Távolság
+@msg	span must be "object" or "selection", got {v}	a span értéke "object" vagy "selection" lehet, nem {v}
+@msg	span: "selection" places a `gradient`, not a swatch	span: "selection" egy `gradient` értéket helyez el, nem színmintát
+@msg	span: "selection" places a gradient: give `gradient`	span: "selection" színátmenetet helyez el: adja meg a `gradient` értéket
+@msg	span: "selection" places a linear or radial gradient, not a freeform one	span: "selection" lineáris vagy sugaras színátmenetet helyez el, nem szabad formájút
+@msg	span: "selection" places the gradient itself: leave out `start` and `end` (they already place it in document coordinates)	span: "selection" magát a színátmenetet helyezi el: hagyja el a `start` és `end` értéket (ezek már a dokumentum koordinátáiban helyezik el)
+	Make Image Dynamic	Kép dinamikussá tétele
+	Import Data Sets…	Adatkészletek importálása…
+	Export Data Sets…	Adatkészletek exportálása…
+	Make Graph Dynamic	Diagram dinamikussá tétele
+	Batch…	Kötegelt feldolgozás…
+	Source Folder:	Forrásmappa:
+	Destination Folder:	Célmappa:
+	Overrides	Felülbírálások
+	Uses every data set of the open document.	A megnyitott dokumentum minden adatkészletét használja.
+@msg	Batch: {count} processed	Kötegelt feldolgozás: {count} feldolgozva
+@msg	Batch: {count} processed, {failed} failed	Kötegelt feldolgozás: {count} feldolgozva, {failed} sikertelen
+@msg	choose a destination folder	válasszon célmappát
+@msg	choose a source folder	válasszon forrásmappát
+@msg	open a document with data sets	nyisson meg egy adatkészleteket tartalmazó dokumentumot
+@msg	the action has no steps	a műveletnek nincsenek lépései
+
+# User Interface › Accent Color
+	Accent Color	Kiemelőszín
+	Amber	Borostyán
+	Coral	Korall
+	Violet	Ibolya
+	Sketch	Vázlat
+	Halftone Pattern…	Féltónus minta…
+	Halftone Pattern	Féltónus minta
+	Pattern Type	Mintatípus
+	Dot	Pont
+# User Interface › Color Scheme
+	Color Scheme	Színséma
+	Modern	Modern
+
+# Symbol Options › Export Type
+	Export Type:	Exportálás típusa:
+	Movie Clip	Mozgóklip
+@msg	name is empty	a név üres
+@msg	no symbol named `{n}`	nincs `{n}` nevű szimbólum

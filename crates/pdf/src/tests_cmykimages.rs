@@ -340,7 +340,7 @@ fn the_output_settings_convert_cmyk_images_and_compression_recompresses_them_in_
     assert_ne!(converted, flat(ink, 16));
     let source = cms::active();
     let dest = cms::Cms::new(&cms::ColorSettings { cmyk: DEVICE_CMYK.into(), ..source.settings().clone() }).unwrap();
-    let want = dest.lab_to_cmyk(source.cmyk_to_lab(ink.map(|v| v as f32 / 255.0)), source.settings().intent).map(|v| (v * 255.0).round() as u8);
+    let want = dest.lab_to_cmyk(source.cmyk_display_lab(ink.map(|v| v as f32 / 255.0)), source.settings().intent).map(|v| (v * 255.0).round() as u8);
     assert!(close(&converted[..4], &want, 3), "{converted:?} vs {want:?}");
     // To RGB: the colour shown on screen.
     let (w, blob, _) = first(json!({"output": {"conversion": "destination", "destination": SRGB}}));

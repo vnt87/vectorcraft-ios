@@ -48,14 +48,13 @@ pub(super) fn length(ui: &mut egui::Ui, d: &mut Dialog, key: &str, unit: Unit, w
 /// The fields of the form dialogs ([`grid`]) that are distances, by dialog kind.
 fn lengths(kind: &str) -> &'static [&'static str] {
     match kind {
-        "move" => &["dx", "dy"],
+        "move" => &["dx", "dy", "distance"],
         "rectangle" | "ellipse" | "rectangularGrid" | "polarGrid" | "artboardOptions" => &["width", "height"],
         "roundedRectangle" => &["width", "height", "radius"],
         "polygon" => &["radius"],
         "star" => &["radius1", "radius2"],
         "lineSegment" => &["length"],
         "offsetPath" => &["offset"],
-        "simplify" => &["tolerance"],
         _ => &[],
     }
 }
@@ -64,7 +63,7 @@ fn lengths(kind: &str) -> &'static [&'static str] {
 /// number: fields that ↑/↓ step by one (Shift: ten) and that do math, as the distances do.
 fn suffix(kind: &str, key: &str) -> Option<&'static str> {
     match (kind, key) {
-        ("rotate" | "shear" | "reflect", "angle") => Some("°"),
+        ("rotate" | "shear" | "reflect" | "move", "angle") => Some("°"),
         ("scale", "sx" | "sy") => Some("%"),
         _ => None,
     }
@@ -74,6 +73,7 @@ fn suffix(kind: &str, key: &str) -> Option<&'static str> {
 /// name).
 fn order(kind: &str) -> &'static [&'static str] {
     match kind {
+        "move" => &["dx", "dy", "distance", "angle"],
         "offsetPath" => &["offset", "joins", "miterLimit"],
         "rectangularGrid" => &["width", "height", "rows", "rowSkew", "columns", "columnSkew"],
         "polarGrid" => &["width", "height", "concentric", "concentricSkew", "radial", "radialSkew"],
@@ -424,12 +424,14 @@ pub(super) fn humanize(k: &str) -> String {
         "Radius1" => "Radius 1".into(),
         "Radius2" => "Radius 2".into(),
         "Max Radius" => "Max. Radius:".into(),
+        "Blur Mode" => "Mode:".into(),
         "Channel1" => "Channel 1:".into(),
         "Channel2" => "Channel 2:".into(),
         "Channel3" => "Channel 3:".into(),
         "Channel4" => "Channel 4:".into(),
         "Include Cmy Blacks" => "Include Blacks with CMY:".into(),
         "Align To Path" => "Align to Path:".into(),
+        "Overlap Variation" | "Curviness Variation" | "Spacing Variation" => "Variation:".into(),
         "Create" => "Create New Fields by:".into(),
         _ => format!("{s}:"),
     }

@@ -76,7 +76,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Transform Each…",
             ["Object", "Transform"],
             Some("Cmd+Alt+Shift+D"),
-            "{scaleH?: % (100), scaleV?: % (100), moveH?: pt, moveV?: pt (down = +), rotate?: deg (counter-clockwise), reflectX?: bool (flip vertically), reflectY?: bool (flip horizontally), random?: bool, seed?: n, reference?: 0..8 (9-point grid, 4 = centre), copy?: bool, strokes?: bool (Scale Strokes & Effects), corners?: bool (Scale Corners; both default to the preferences), objects?: bool (Transform Objects, default true; false: the art stays and, with patterns, only its pattern tiles transform), patterns?: bool (Transform Patterns; default: prefs transformPatternTiles)} transform every selected object about its own reference point → {ids}",
+            "{scaleH?: % (100), scaleV?: % (100), moveH?: pt, moveV?: pt (down = +), rotate?: deg (counter-clockwise), reflectX?: bool (flip left-right, as Reflect X in the Transform Each dialog), reflectY?: bool (flip top-bottom, as Reflect Y), random?: bool, seed?: n, reference?: 0..8 (9-point grid, 4 = centre), copy?: bool, strokes?: bool (Scale Strokes & Effects), corners?: bool (Scale Corners; both default to the preferences), objects?: bool (Transform Objects, default true; false: the art stays and, with patterns, only its pattern tiles transform), patterns?: bool (Transform Patterns; default: prefs transformPatternTiles)} transform every selected object about its own reference point → {ids}",
             has_selection,
             transform_each
         ),
@@ -312,6 +312,19 @@ fn about(o: Point, a: Affine) -> Affine {
 }
 
 fn transform_each(s: &mut Session, p: &Value) -> Result<Value> {
+    transform_each_as(s, p, "Transform Each")
+}
+
+/// Object → Transform → Transform Again (⌘D) repeating a Transform Each: the same per-object
+/// transform again (or another copy), run as the command so each object turns about its own
+/// bounds (see [`transform_again`](super::object::transform_again)).
+pub(crate) fn transform_each_again(s: &mut Session, p: &Value) -> Result<Value> {
+    transform_each_as(s, p, "Transform Again")
+}
+
+/// [`transform_each`] under an undo label. Outside an interaction it records what Transform Again
+/// repeats; a dialog's preview records it as it commits (`Session::commit_interaction`).
+fn transform_each_as(s: &mut Session, p: &Value, label: &str) -> Result<Value> {
     let roots = selected_roots(s)?;
     // Bounded so coordinates stay finite (and the document stays serializable).
     let sh = f64_or(p, "scaleH", 100.0).clamp(-100_000.0, 100_000.0);
@@ -337,7 +350,7 @@ fn transform_each(s: &mut Session, p: &Value) -> Result<Value> {
     if roots.is_empty() || (!copy && sh == 100.0 && sv == 100.0 && mh == 0.0 && mv == 0.0 && rot == 0.0 && !rx && !ry) {
         return Ok(ids_json(&roots));
     }
-    let ids = s.edit("Transform Each", |d, sel| {
+    let ids = s.edit(label, |d, sel| {
         let targets = if copy { duplicate_in(d, sel, &roots, Affine::IDENTITY)? } else { roots.clone() };
         for id in &targets {
             let Some(b) = d.node(*id).and_then(|n| n.geometric_bounds()) else { continue };
@@ -350,7 +363,9 @@ fn transform_each(s: &mut Session, p: &Value) -> Result<Value> {
                 k_rot = rot * (rng.next() * 2.0 - 1.0);
             }
             let o = vectorcraft_geom::reference_point(b, refi);
-            let refl = Affine::scale_non_uniform(if ry { -1.0 } else { 1.0 }, if rx { -1.0 } else { 1.0 });
+            // Reflect X / Reflect Y match Object › Transform › Transform Each and Effect › Distort › Transform:
+            // Reflect X flips left-right (negate x), Reflect Y flips top-bottom (negate y).
+            let refl = Affine::scale_non_uniform(if rx { -1.0 } else { 1.0 }, if ry { -1.0 } else { 1.0 });
             let m = Affine::translate((k_mh, k_mv))
                 * about(o, Affine::rotate(-k_rot.to_radians()) * refl * Affine::scale_non_uniform(k_sh / 100.0, k_sv / 100.0));
             if let Some(n) = d.node_mut(*id) {
@@ -359,6 +374,11 @@ fn transform_each(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(targets)
     })?;
+    let st = s.doc_mut()?;
+    if st.interaction.is_none() {
+        st.last_transform = Some(crate::LastTransform::Each(p.clone()));
+        st.last_perspective = None;
+    }
     Ok(ids_json(&ids))
 }
 
@@ -644,9 +664,18 @@ fn trim_image(s: &mut Session, id: NodeId, im: ImageObject) -> Result<Value> {
         return Ok(json!({ "id": id.0, "width": im.width, "height": im.height, "trimmed": false }));
     }
     // Print rasters run to gigabytes decoded: the same allowance opening them has.
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(blob.bytes.as_slice()))
-        .with_guessed_format()
-        .map_err(|_| bad(C, "the image's pixels can't be read"))?;
+    let reader = || {
+        image::ImageReader::new(std::io::Cursor::new(blob.bytes.as_slice()))
+            .with_guessed_format()
+            .map_err(|_| bad(C, "the image's pixels can't be read"))
+    };
+    // The image's size as RGBA, read from its header, is held to that allowance before anything
+    // is decoded (#1717).
+    let (w, h) = reader()?.into_dimensions().map_err(|e| bad(C, format!("the image's pixels can't be read: {e}")))?;
+    if u64::from(w) * u64::from(h) > crate::cmd::fileio::MAX_RASTER_ALLOC / 4 {
+        return Err(bad(C, format!("an image of {w} × {h} pixels is too large to draw")));
+    }
+    let mut reader = reader()?;
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(crate::cmd::fileio::MAX_RASTER_ALLOC);
     reader.limits(limits);

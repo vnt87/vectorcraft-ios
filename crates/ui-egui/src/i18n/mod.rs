@@ -94,8 +94,18 @@ fn plural_polish(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 16] = [
+pub static LANGUAGES: [LangInfo; 23] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
+    // Greek: the whole interface and the status and error messages, keeping the same names in
+    // English as Spanish; every `el-*` locale (including `el-GR` and `el-CY`) resolves here.
+    LangInfo {
+        code: "el",
+        name: "Ελληνικά",
+        source: include_str!("el.tsv"),
+        plural: plural_one_other,
+        complete_menus: true,
+        catalog: OnceLock::new(),
+    },
     // Japanese: the whole interface (every menu string and `tl!` literal) and the status and error
     // messages, keeping the product, workspace and perspective preset names in English (`MENU_KEEP_AS_IS`).
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
@@ -164,6 +174,16 @@ pub static LANGUAGES: [LangInfo; 16] = [
         complete_menus: true,
         catalog: OnceLock::new(),
     },
+    // Bulgarian: the whole interface (every menu string and `tl!` literal) and the status and error
+    // messages, with one/other plural forms; every `bg-*` locale (including `bg-BG`) resolves here.
+    LangInfo {
+        code: "bg",
+        name: "Български",
+        source: include_str!("bg.tsv"),
+        plural: plural_one_other,
+        complete_menus: true,
+        catalog: OnceLock::new(),
+    },
     // Hungarian: the whole interface and the status and error messages, keeping the same names in
     // English as Spanish; a count takes the singular ("3 réteg"), so plurals have one form. Every
     // `hu-*` locale (including `hu-HU`) resolves here.
@@ -172,15 +192,25 @@ pub static LANGUAGES: [LangInfo; 16] = [
     // keeping the same names in English as Spanish; every `pl-*` locale (including `pl-PL`)
     // resolves here.
     LangInfo { code: "pl", name: "Polski", source: include_str!("pl.tsv"), plural: plural_polish, complete_menus: true, catalog: OnceLock::new() },
-    // Brazilian Portuguese: every menu label (`menu_catalogs_translate_every_menu_label`), every
-    // `tl!` literal and the plural messages; left English on purpose are the `MENU_KEEP_AS_IS`
-    // strings (product name, language names, workspace names, perspective grid presets).
+    // Swedish: the whole interface and the status and error messages, keeping the same names in
+    // English as Spanish; every `sv-*` locale (`sv-SE`, `sv-FI` …) resolves here.
+    LangInfo {
+        code: "sv",
+        name: "Svenska",
+        source: include_str!("sv.tsv"),
+        plural: plural_one_other,
+        complete_menus: true,
+        catalog: OnceLock::new(),
+    },
+    // Brazilian Portuguese: the whole interface and the status and error messages, keeping the
+    // same names in English as Spanish; every `pt-BR` / `pt_BR` locale resolves here (see
+    // `candidates`: `pt-br` then `pt`).
     LangInfo {
         code: "pt-br",
         name: "Português (Brasil)",
         source: include_str!("pt-br.tsv"),
         plural: plural_one_other,
-        complete_menus: false,
+        complete_menus: true,
         catalog: OnceLock::new(),
     },
     // Traditional Chinese in the vocabulary used in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*`
@@ -202,7 +232,31 @@ pub static LANGUAGES: [LangInfo; 16] = [
         plural: plural_none,
         complete_menus: true,
         catalog: OnceLock::new(),
+    }, // Dutch; every `nl-*` locale (`nl-NL`, `nl-BE`, `nl_NL.UTF-8`…) resolves here.
+    LangInfo {
+        code: "nl",
+        name: "Nederlands",
+        source: include_str!("nl.tsv"),
+        plural: plural_one_other,
+        complete_menus: true,
+        catalog: OnceLock::new(),
     },
+    // Danish; every `da-*` locale (`da-DK`, `da_DK.UTF-8`…) resolves here.
+    LangInfo { code: "da", name: "Dansk", source: include_str!("da.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
+    // Indonesian; every `id-*` locale (`id-ID`, `id_ID.UTF-8`…) resolves here. CLDR `id` counts
+    // have one form, so `@plural` entries list a single form.
+    LangInfo {
+        code: "id",
+        name: "Bahasa Indonesia",
+        source: include_str!("id.tsv"),
+        plural: plural_none,
+        complete_menus: true,
+        catalog: OnceLock::new(),
+    },
+    // Finnish: the whole interface and the status and error messages, keeping the same names in
+    // English as Spanish; one/other plurals with the partitive after any number but 1 ("2 tasoa").
+    // Every `fi-*` locale resolves here.
+    LangInfo { code: "fi", name: "Suomi", source: include_str!("fi.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -403,19 +457,33 @@ fn detect_system_lang() -> Lang {
     Lang::EN
 }
 
-/// Index into [`LANGUAGES`] of the language the UI is drawn in this frame.
-static CURRENT: AtomicUsize = AtomicUsize::new(0);
+/// Index into [`LANGUAGES`] of the language the UI is drawn in this frame. The app keeps one
+/// index for the whole process. Unit tests keep one per thread, as `ui_mirror!` keeps the
+/// shortcut and workspace mirrors, so a language one test sets does not change the language of
+/// the tests running beside it on other threads.
+fn current_index() -> &'static AtomicUsize {
+    #[cfg(not(test))]
+    {
+        static CURRENT: AtomicUsize = AtomicUsize::new(0);
+        &CURRENT
+    }
+    #[cfg(test)]
+    {
+        thread_local!(static CURRENT: &'static AtomicUsize = Box::leak(Box::default()));
+        CURRENT.with(|c| *c)
+    }
+}
 
 /// Set the UI language for drawing (the shell calls this once per frame from the preference), so
 /// widgets can translate without every call site carrying a language around.
 pub fn set_current(lang: Lang) {
     let i = LANGUAGES.iter().position(|l| l.code == lang.code()).unwrap_or(0);
-    CURRENT.store(i, Ordering::Relaxed);
+    current_index().store(i, Ordering::Relaxed);
 }
 
 /// The language the UI is drawn in.
 pub fn current() -> Lang {
-    Lang(LANGUAGES.get(CURRENT.load(Ordering::Relaxed)).unwrap_or(&LANGUAGES[0]))
+    Lang(LANGUAGES.get(current_index().load(Ordering::Relaxed)).unwrap_or(&LANGUAGES[0]))
 }
 
 /// Does `lang` have a catalog entry for this plain string? (English never does: it is the source.)
@@ -436,6 +504,12 @@ pub fn tr(lang: Lang, s: &str) -> &str {
 /// Like [`tr`], for an English string that needs a disambiguating `context`.
 pub fn tr_ctx<'a>(lang: Lang, context: &str, s: &'a str) -> &'a str {
     lang.catalog().contextual(context, s).unwrap_or_else(|| tr(lang, s))
+}
+
+/// A name the app gives something (a default swatch's), translated where the current language has
+/// a `context` row for it; any other name (one the user gave) comes back as it is.
+pub fn t_name<'a>(context: &str, name: &'a str) -> &'a str {
+    current().catalog().contextual(context, name).unwrap_or(name)
 }
 
 /// A string keyed by its command id, falling back to the translation of the English `label`.
