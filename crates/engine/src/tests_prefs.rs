@@ -240,6 +240,20 @@ fn linux_display_server_defaults_to_automatic_and_validates() {
     assert_eq!(s.prefs.linux_display_server, "automatic");
 }
 
+/// Linux Display Server's pen choice (#2028): set by value or by label, saved, and off by default.
+#[test]
+fn linux_display_server_has_a_choice_for_an_attached_pen() {
+    let mut s = Session::new();
+    s.execute("prefs.set", &json!({"key": "linuxDisplayServer", "value": "x11WithPen"})).unwrap();
+    assert_eq!(s.prefs.linux_display_server, "x11WithPen");
+    assert_eq!(s.prefs.to_json()["linuxDisplayServer"], "x11WithPen");
+    s.execute("prefs.set", &json!({"key": "linuxDisplayServer", "value": "automatic"})).unwrap();
+    s.execute("prefs.set", &json!({"key": "linuxDisplayServer", "value": "X11 (XWayland) When a Pen Is Attached"})).unwrap();
+    assert_eq!(s.prefs.linux_display_server, "x11WithPen");
+    s.execute("prefs.reset", &json!({"category": "Performance"})).unwrap();
+    assert_eq!(s.prefs.linux_display_server, "automatic");
+}
+
 /// Selection & Anchor Display › Tolerance, Object Selection by Path Only and Command Click to
 /// Select Objects Behind, and General › Double Click To Isolate, as the Selection tool sees them
 /// (#394).
@@ -1167,7 +1181,10 @@ fn new_type_starts_with_placeholder_text() {
     gesture(&mut s, v, &[(Down, 100.0, 150.0), (Drag, 300.0, 300.0), (Up, 300.0, 300.0)]);
     assert!(text(&s).len() > placeholder.len());
     set_pref(&mut s, "placeholderText", json!(false));
-    gesture(&mut s, v, &[(Down, 50.0, 350.0), (Up, 50.0, 350.0)]);
+    // The first click ends editing the area type (#2871); the second places point type.
+    for _ in 0..2 {
+        gesture(&mut s, v, &[(Down, 50.0, 350.0), (Up, 50.0, 350.0)]);
+    }
     assert_eq!(text(&s), "");
 }
 
@@ -1194,6 +1211,55 @@ fn missing_glyph_protection_keeps_glyphs_a_new_font_lacks() {
     set_pref(&mut s, "missingGlyphProtection", json!(false));
     s.execute("text.setStyle", &json!({"font": to})).unwrap();
     assert_eq!(fonts(&s), [to, to, to]);
+}
+
+/// A character that keeps its font through Missing Glyph Protection keeps that font's Variable
+/// Font settings too; the characters that take the new font lose them.
+#[test]
+fn missing_glyph_protection_keeps_the_variable_font_settings_of_the_font_kept() {
+    use vectorcraft_text::test_fonts::{TWO_AXIS_FAMILY as FROM, two_axis_font};
+    let (to, c) = ("JetBrains Mono", '\u{180}');
+    let db = vectorcraft_text::FontDb::global();
+    db.add_font(two_axis_font().unwrap());
+    if !db.face(FROM, "Regular").is_some_and(|f| f.covers(c)) || db.face(to, "Regular").is_some_and(|f| f.covers(c)) {
+        return; // An installed font of that name covers the character.
+    }
+    let mut s = new_doc();
+    let id = NodeId(s.execute("text.create", &json!({"x": 10, "y": 50, "text": "a\u{180}c", "font": FROM})).unwrap()["id"].as_u64().unwrap());
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.execute("text.setFormat", &json!({"fontAxes": {"wght": 650}})).unwrap();
+    let fonts = |s: &Session| [0, 1, 3].map(|b| style_at(s, id, b)).map(|st| (st.font_family, st.font_axes.get("wght").copied()));
+    let (kept, moved) = ((FROM.to_string(), Some(650.0)), (to.to_string(), None));
+    for change in [json!({"font": to}), json!({"id": id.0, "start": 0, "end": 4, "font": to})] {
+        let cmd = if change.get("id").is_some() { "text.setRangeStyle" } else { "text.setStyle" };
+        s.execute(cmd, &change).unwrap();
+        assert_eq!(fonts(&s), [moved.clone(), kept.clone(), moved.clone()], "{cmd}");
+        s.execute("edit.undo", &json!({})).unwrap();
+    }
+}
+
+/// A character that keeps its font through Missing Glyph Protection keeps the version of it the
+/// type names.
+#[test]
+fn missing_glyph_protection_keeps_the_version_of_the_font_kept() {
+    use vectorcraft_text::test_fonts::{TWIN_FAMILY as FROM, TWIN_VERSIONS, twin_font};
+    let (to, c) = ("JetBrains Mono", '\u{180}');
+    let db = vectorcraft_text::FontDb::global();
+    db.add_font(twin_font(false).unwrap());
+    let older = db.face_version(FROM, "Regular", Some(TWIN_VERSIONS[0]));
+    if !older.is_some_and(|f| f.version == TWIN_VERSIONS[0] && f.covers(c)) || db.face(to, "Regular").is_some_and(|f| f.covers(c)) {
+        return; // An installed font of that name covers the character.
+    }
+    let mut s = new_doc();
+    let id = NodeId(s.execute("text.create", &json!({"x": 10, "y": 50, "text": "a\u{180}c", "font": FROM})).unwrap()["id"].as_u64().unwrap());
+    if let Some(NodeKind::Text(t)) = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc).node_mut(id).map(|n| &mut n.kind) {
+        t.runs[0].style.font_version = Some(TWIN_VERSIONS[0].into());
+    }
+    s.execute("select.set", &json!({"ids": [id.0]})).unwrap();
+    s.execute("text.setStyle", &json!({"font": to})).unwrap();
+    let versions = [0, 1, 3].map(|b| (style_at(&s, id, b).font_family, style_at(&s, id, b).font_version));
+    let (kept, moved) = ((FROM.to_string(), Some(TWIN_VERSIONS[0].to_string())), (to.to_string(), None));
+    assert_eq!(versions, [moved.clone(), kept, moved]);
 }
 
 // ---------- #394, fourth batch ----------

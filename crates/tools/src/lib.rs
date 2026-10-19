@@ -22,6 +22,7 @@ pub mod guides;
 pub mod intertwine;
 pub mod meshblend;
 pub mod meshedit;
+pub mod mirror;
 pub mod params;
 pub mod pathtype;
 pub mod pen;
@@ -36,6 +37,7 @@ pub mod shaperwidget;
 pub mod slice;
 pub mod symbolism;
 pub mod text;
+pub mod touchtype;
 pub mod typewidget;
 pub mod xform;
 
@@ -224,6 +226,9 @@ impl ScreenFrame {
 /// Read-only context a tool sees.
 pub struct ToolContext<'a> {
     pub doc: &'a Document,
+    /// The rulers' zero point with the view's active artboard (see
+    /// [`Document::ruler_origin_for`]): where ruler ticks and measured positions count from.
+    pub ruler_origin: Point,
     /// Which open document `doc` is (its process-unique id) and its revision, which moves with
     /// every change of the document or the selection: what a tool keeps between pointer events
     /// for the document as it is (the snap targets of hovering) is keyed on it.
@@ -351,6 +356,12 @@ impl ToolContext<'_> {
     /// Tolerance in document units for `px` screen pixels.
     pub fn tol(&self, px: f64) -> f64 {
         px / self.zoom.max(1e-9)
+    }
+    /// How far the view is turned (Rotate View), in degrees clockwise on screen; 0 without a
+    /// window.
+    pub fn view_angle(&self) -> f64 {
+        // `right` is one screen pixel to the right, in document units.
+        self.screen.map(|s| (-s.right.y).atan2(s.right.x).to_degrees()).filter(|a| a.is_finite()).unwrap_or(0.0)
     }
     /// How near (document units) a smart guide target pulls: Smart Guides → Snapping Tolerance.
     pub fn snap_tol(&self) -> f64 {
@@ -483,6 +494,8 @@ pub enum Cursor {
     ZoomOut,
     Eyedropper,
     NotAllowed,
+    /// A long operation (opening a file, a background save or export): the OS wait cursor.
+    Busy,
     /// Over the gradient annotator's bar: a click adds a stop.
     AddStop,
     /// A gradient stop dragged off the bar: releasing deletes it.
@@ -508,6 +521,9 @@ pub enum Cursor {
     /// Over the type widget of selected type (a double-click converts point type to area type and
     /// back): the arrow with a type badge.
     TypeWidget,
+    /// The Selection tool loaded with the text of an area type's out port (a click threads it
+    /// into a path or a new frame, a drag draws the new frame).
+    LoadedText,
     /// The Shape Builder: a crosshair with a plus (merge mode)...
     ShapeBuilder,
     /// ...or, with Alt held, a minus (erase mode).
@@ -581,6 +597,31 @@ impl Cursor {
         Cursor::RotateToward(octant.rem_euclid(8) as u8)
     }
 
+    /// [`Cursor::rotate_about`] in a view turned `view` degrees clockwise
+    /// ([`ToolContext::view_angle`]): the pointer's side of `center` as it shows on screen. The
+    /// pointer's direction turns with the view before it rounds to the nearest 45°.
+    pub fn rotate_about_in_view(center: Point, p: Point, view: f64) -> Self {
+        let (sn, cs) = if view.is_finite() { view.to_radians().sin_cos() } else { (0.0, 1.0) };
+        let d = p - center;
+        // y points down the page, so this turns `d` clockwise on the page.
+        Cursor::rotate_about(center, center + Vec2::new(d.x * cs - d.y * sn, d.x * sn + d.y * cs))
+    }
+
+    /// The cursor as it shows in a view turned `deg` degrees clockwise (Rotate View): the resize
+    /// cursors and [`Cursor::RotateToward`] turn with the view to the nearest 45°, and every other
+    /// cursor stays as it is.
+    pub fn turned(self, deg: f64) -> Self {
+        const RESIZE: [Cursor; 4] = [Cursor::ResizeH, Cursor::ResizeNeSw, Cursor::ResizeV, Cursor::ResizeNwSe];
+        let k = if deg.is_finite() { (deg / 45.0).round() as i64 } else { 0 };
+        match self {
+            Cursor::RotateToward(o) => Cursor::RotateToward((i64::from(o) + k).rem_euclid(8) as u8),
+            c => match RESIZE.iter().position(|r| *r == c) {
+                Some(i) => RESIZE.get((i as i64 - k).rem_euclid(4) as usize).copied().unwrap_or(c),
+                None => c,
+            },
+        }
+    }
+
     /// General › Use Precise Cursors: the drawing tools' pointers (the Pen's in every state, the
     /// Anchor Point and Curvature tools', the Eyedropper's, the Slice and Blend tools') become a plain crosshair at the hotspot.
     pub fn precise(self) -> Self {
@@ -632,7 +673,7 @@ impl Cursor {
     }
 
     /// The cursor this one borrows until it's drawn: the generic crosshair for the
-    /// tools, the I-beam for vertical type, the Pen's add cursor for the Mesh tool and Puppet
+    /// tools, the I-beam for vertical type and loaded text, the Pen's add cursor for the Mesh tool and Puppet
     /// Warp, not-allowed for the Scissors away from a path. `None` for a cursor with a look of
     /// its own.
     pub fn stand_in(self) -> Option<Self> {
@@ -660,7 +701,7 @@ impl Cursor {
             | Cursor::SymbolScreener
             | Cursor::SymbolStyler
             | Cursor::Scissors => Some(Cursor::Crosshair),
-            Cursor::TypeVertical => Some(Cursor::Text),
+            Cursor::TypeVertical | Cursor::LoadedText => Some(Cursor::Text),
             Cursor::MeshAdd | Cursor::PuppetPin => Some(Cursor::PenAdd),
             Cursor::ScissorsNotAllowed => Some(Cursor::NotAllowed),
             _ => None,
@@ -768,6 +809,7 @@ pub fn create(id: &str) -> Box<dyn Tool> {
             .or_else(|| cropimage::create(other))
             .or_else(|| cut::create(other))
             .or_else(|| intertwine::create(other))
+            .or_else(|| touchtype::create(other))
             .unwrap_or_else(|| Box::new(NoopTool(tool_info(other).map(|t| t.id).unwrap_or("selection")))),
     }
 }
@@ -828,13 +870,44 @@ pub(crate) mod testutil {
         (d, id)
     }
 
+    /// [`doc_with_rect`] plus a Shaper Group of two source squares (x from 0 to 100 and from 50 to
+    /// 150, y from 300 to 400) whose visible face is the first square: the document, the group, its
+    /// source shapes and the face.
+    pub fn doc_with_shaper_group() -> (Document, NodeId, NodeId, NodeId) {
+        use std::sync::Arc;
+        let (mut d, _) = doc_with_rect();
+        let l = d.layers[0].id;
+        let square = |x: f64| shapes::rectangle(Rect::new(x, 300.0, x + 100.0, 400.0));
+        let a = Node::path(d.alloc_id(), square(0.0), Appearance::default_art());
+        let b = Node::path(d.alloc_id(), square(50.0), Appearance::default_art());
+        let mut sources = Node::group(d.alloc_id(), vec![Arc::new(a), Arc::new(b)]);
+        sources.name = Some(vectorcraft_doc::shaper::SOURCES.into());
+        sources.opacity = 0.0;
+        let mut face = Node::path(d.alloc_id(), square(0.0), Appearance::default_art());
+        face.name = Some(format!("{}0", vectorcraft_doc::shaper::FILL_PREFIX));
+        let (sources_id, face_id) = (sources.id, face.id);
+        let mut group = Node::group(d.alloc_id(), vec![Arc::new(sources), Arc::new(face)]);
+        group.extras_mut().shaper = Some(Box::default());
+        let group_id = group.id;
+        d.insert(Some(l), 1, group).unwrap();
+        (d, group_id, sources_id, face_id)
+    }
+
     pub fn paint() -> PaintDefaults {
         PaintDefaults::default()
+    }
+
+    /// An 800 × 600 window on a view at 100% turned `deg` degrees clockwise (Rotate View): at 90°
+    /// one pixel right on screen is one point up the page.
+    pub fn turned_view(deg: f64) -> Option<ScreenFrame> {
+        let (sn, cs) = deg.to_radians().sin_cos();
+        Some(ScreenFrame { origin: Point::ORIGIN, right: Vec2::new(cs, -sn), down: Vec2::new(sn, cs), size: (800.0, 600.0) })
     }
 
     pub fn cx<'a>(d: &'a Document, s: &'a Selection, p: &'a PaintDefaults) -> ToolContext<'a> {
         ToolContext {
             doc: d,
+            ruler_origin: d.ruler_origin_for(0),
             revision: (0, 0),
             selection: s,
             zoom: 1.0,

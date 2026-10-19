@@ -409,7 +409,7 @@ fn magnifier(p: &mut Ink, o: Pos2, out: bool) {
 
 /// Every cursor with a glyph: its own, drawn here, or the one it borrows.
 #[cfg(test)]
-const GLYPHS: [Cursor; 74] = [
+const GLYPHS: [Cursor; 75] = [
     Cursor::Hand,
     Cursor::HandGrab,
     Cursor::ZoomIn,
@@ -456,6 +456,7 @@ const GLYPHS: [Cursor; 74] = [
     Cursor::BlendAnchor,
     Cursor::PathBracket,
     Cursor::TypeWidget,
+    Cursor::LoadedText,
     Cursor::ShapeBuilder,
     Cursor::ShapeBuilderErase,
     Cursor::Lasso,
@@ -797,6 +798,7 @@ mod tests {
             assert!(pixel(&dropper, hx, hy)[3] > 0, "the tip covers the hotspot at {ppp}");
         }
         assert!(rasterize(Cursor::NotAllowed, 1.0).is_none(), "the busy states stay system cursors");
+        assert!(rasterize(Cursor::Busy, 1.0).is_none());
         assert!(rasterize(Cursor::ScissorsNotAllowed, 1.0).is_none(), "until it's drawn it borrows the system not-allowed cursor");
         for ppp in [0.0, -1.0, f32::NAN, f32::INFINITY, 1e9] {
             assert!(rasterize(Cursor::Arrow, ppp).is_none(), "{ppp}");
