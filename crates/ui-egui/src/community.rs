@@ -2,7 +2,7 @@
 
 use egui::Ui;
 
-use crate::theme::{self, Tokens};
+use crate::theme::Tokens;
 use crate::{VectorcraftApp, icons};
 
 /// One link row: icon, label, opens the command's URL.
@@ -49,7 +49,7 @@ mod tests {
         assert_eq!(v["url"], "https://getartcraft.com");
         assert_eq!(opened.lock().unwrap().len(), 3);
         let ctx = egui::Context::default();
-        theme::install_fonts(&ctx);
+        crate::theme::install_fonts(&ctx);
         let mut out = ctx.run_ui(egui::RawInput::default(), |ui| links(&mut app, ui));
         out.textures_delta.clear();
     }

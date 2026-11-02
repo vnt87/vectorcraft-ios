@@ -276,7 +276,7 @@ fn coordinated_write(url: Retained<NSURL>, bytes: &[u8]) -> Result<(), String> {
 
 /// The document types a picker offers: the extensions of the first filter (the union of what the
 /// app reads or places), or any data when none of them names a known type.
-fn content_types(extensions: &[&str]) -> Retained<NSArray<UTType>> {
+fn content_types(extensions: &[String]) -> Retained<NSArray<UTType>> {
     let mut types: Vec<Retained<UTType>> =
         extensions.iter().filter_map(|extension| UTType::typeWithFilenameExtension(&NSString::from_str(extension))).collect();
     if types.is_empty() {
@@ -286,7 +286,7 @@ fn content_types(extensions: &[&str]) -> Retained<NSArray<UTType>> {
 }
 
 /// Present the open picker on the main queue; its answer is the imported snapshots' paths.
-fn open_picker(reply: Reply, root: PathBuf, multiple: bool, extensions: Vec<&'static str>) {
+fn open_picker(reply: Reply, root: PathBuf, multiple: bool, extensions: Vec<String>) {
     dispatch2::DispatchQueue::main().exec_async(move || {
         let Some(mtm) = objc2::MainThreadMarker::new() else {
             fail_completion(Completion::Open(reply, root), "UIKit main queue unavailable".into());
@@ -375,8 +375,10 @@ pub fn install(services: &mut Services, root: PathBuf, ui: egui::Context) -> Res
                 open_picker(reply, dialog_root.clone(), false, extensions);
             }
             PickRequest::OpenMany => {
-                let extensions =
-                    vectorcraft_engine::cmd::fileio::place_filters().next().map(|(_, extensions)| extensions.to_vec()).unwrap_or_default();
+                let extensions = vectorcraft_engine::cmd::fileio::place_filters()
+                    .next()
+                    .map(|(_, extensions)| extensions.iter().map(|extension| extension.to_string()).collect())
+                    .unwrap_or_default();
                 open_picker(reply, dialog_root.clone(), true, extensions);
             }
             PickRequest::Folder => {

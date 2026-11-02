@@ -43,8 +43,8 @@ impl eframe::App for IosApp {
         self.app.ui(ui);
     }
 
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.app.raw_input_hook(raw_input);
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.app.raw_input_hook(ctx, raw_input);
         crate::safe_area::apply(raw_input);
     }
 

@@ -186,14 +186,15 @@ struct Pointing<'a> {
     view: vectorcraft_engine::ViewInfo,
 }
 
-/// Zoom around the pointer, and scroll ([`wheel`]); a trackpad rotation turns the view. Returns the pointer, the
-/// modifiers, whether Space is held and where the pointer hovers over the canvas.
+/// Zoom around the pointer, and scroll ([`wheel`]); a trackpad rotation turns the view. Returns the
+/// pointer, the modifiers, whether Space is held, where the pointer hovers over the canvas and
+/// whether that pointer is a palm (which paints nothing).
 fn wheel_view(
     app: &mut VectorcraftApp,
     ui: &Ui,
     resp: &egui::Response,
     rect: egui::Rect,
-) -> (egui::PointerState, egui::Modifiers, bool, Option<Pos2>) {
+) -> (egui::PointerState, egui::Modifiers, bool, Option<Pos2>, bool) {
     let line = ui.ctx().options(|o| o.input_options.line_scroll_speed);
     let wheel_zooms = app.session.prefs.zoom_with_mouse_wheel;
     let animate = animated_zoom(&app.session.prefs);
