@@ -45,6 +45,13 @@ Implemented, installed, awaiting a device check (2026-10-13): two-finger pan and
 fingers, Pencil hover and palm rejection (`gestures.rs`, `pen.rs`; host-tested). Tilt, roll, double-tap and
 the eraser end are not read: no tool takes them.
 
+Hardware keyboard (a Logitech Folio, say), implemented awaiting a device check (2026-11-03). iPadOS hands a
+UIKit app only the characters it types and Backspace, so Enter, the arrows, Esc and the ⌘ shortcuts reached
+nothing. The runner now reads the keyboard through GameController and injects what iPadOS withholds — Enter,
+arrows, Home/End, Page Up/Down, Delete, Esc, Tab, F-keys, the ⌘/Ctrl chords with their modifiers, and key
+repeat (`apps/vectorcraft-ios/src/gc_keyboard.rs` and `hw_keys.rs`, host-tested). Known gap: ⌘/Option+Backspace
+(delete word or line) is still the plain Backspace UIKit types.
+
 ## Revision history
 
 | Date | Change | Summary |
