@@ -612,9 +612,10 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
                 sub(
                     "Arrange",
                     vec![
-                        todo("Cascade"),
+                        c("Cascade", "window.arrange.cascade"),
                         c("Tile", "window.arrange.tile"),
-                        todo("Float in Window"),
+                        c("Float in Window", "window.arrange.floatInWindow"),
+                        c("Float All in Windows", "window.arrange.floatAllInWindows"),
                         c("Consolidate All Windows", "window.arrange.consolidateAllWindows"),
                     ],
                 ),
@@ -628,6 +629,7 @@ pub fn menu_tree_named(english_names: bool) -> Vec<(&'static str, Vec<Item>)> {
             ];
             let lang = crate::i18n::current();
             let mut panels = vec![
+                panel("3D and Materials", crate::panels::three_d::ID),
                 panel("Actions", "actions"),
                 panel("Align", "align"),
                 panel("Appearance", "appearance"),

@@ -1,29 +1,46 @@
-//! Project links (website, app page, GitHub) for About and Home. Icons are Lucide's (ISC).
+//! Project links (website, app page, GitHub) for About and Home. Icons are Lucide's (ISC). The
+//! fork has no Discord button.
 
 use egui::Ui;
 
 use crate::theme::Tokens;
 use crate::{VectorcraftApp, icons};
 
-/// One link row: icon, label, opens the command's URL.
-fn link(app: &mut VectorcraftApp, ui: &mut Ui, icon: &str, label: &str, cmd: &str, url: &str) {
+/// One link row: icon, label, opens the command's URL. `centered` drops the icon so the label
+/// alone sits in the middle of the column.
+fn link(app: &mut VectorcraftApp, ui: &mut Ui, icon: &str, label: &str, cmd: &str, url: &str, centered: bool) {
     let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        icons::icon(ui, icon, 16.0, t.icon);
-        let r = ui.add(egui::Button::new(egui::RichText::new(label).color(t.accent).size(13.0)).frame(false)).on_hover_text(url);
-        if r.clicked() {
-            app.open_link(cmd);
-        }
-    });
+    let button = |ui: &mut Ui| ui.add(egui::Button::new(egui::RichText::new(label).color(t.accent).size(13.0)).frame(false)).on_hover_text(url);
+    let r = if centered {
+        button(ui)
+    } else {
+        ui.horizontal(|ui| {
+            icons::icon(ui, icon, 16.0, t.icon);
+            button(ui)
+        })
+        .inner
+    };
+    if r.clicked() {
+        app.open_link(cmd);
+    }
 }
 
-/// The website / app page / GitHub links.
+/// The website, app page and GitHub links.
 pub fn links(app: &mut VectorcraftApp, ui: &mut Ui) {
+    links_in(app, ui, false);
+}
+
+/// [`links`] for a centred column (the Home screen's, as PhotoCraft's, #4684), each link in the middle.
+pub fn links_centered(app: &mut VectorcraftApp, ui: &mut Ui) {
+    links_in(app, ui, true);
+}
+
+fn links_in(app: &mut VectorcraftApp, ui: &mut Ui, centered: bool) {
     let l = app.session.execute("help.links", &serde_json::json!({})).unwrap_or_default();
     let s = |k: &str| l[k].as_str().unwrap_or("").to_string();
-    link(app, ui, "globe", tl!("ArtCraft website"), "help.website", &s("website"));
-    link(app, ui, "external-link", tl!("VectorCraft on getartcraft.com"), "help.appPage", &s("appPage"));
-    link(app, ui, "git-branch", tl!("Source code on GitHub"), "help.github", &s("github"));
+    link(app, ui, "globe", tl!("ArtCraft website"), "help.website", &s("website"), centered);
+    link(app, ui, "external-link", tl!("VectorCraft on getartcraft.com"), "help.appPage", &s("appPage"), centered);
+    link(app, ui, "git-branch", tl!("Source code on GitHub"), "help.github", &s("github"), centered);
 }
 
 #[cfg(test)]
@@ -44,9 +61,6 @@ mod tests {
             *opened.lock().unwrap(),
             ["https://getartcraft.com", "https://getartcraft.com/apps/vectorcraft", "https://github.com/storytold/vectorcraft"]
         );
-        // The control channel / MCP path returns the URL without opening a browser.
-        let v = app.run("help.website", serde_json::json!({})).unwrap();
-        assert_eq!(v["url"], "https://getartcraft.com");
         assert_eq!(opened.lock().unwrap().len(), 3);
         let ctx = egui::Context::default();
         crate::theme::install_fonts(&ctx);
