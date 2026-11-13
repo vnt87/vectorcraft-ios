@@ -3,6 +3,10 @@ use super::mesh::{GradientMesh, MeshPoint, grid_len, grid_points, surface_of};
 use super::{Affine, Arc, Color, Deserialize, Node, NodeId, NodeKind, PathData, Point, Rect, Serialize, Vec2, yes};
 use vectorcraft_geom::Homography;
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 /// How an envelope distorts its content.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -19,6 +23,10 @@ pub enum EnvelopeKind {
         v: f64,
         #[serde(default = "yes")]
         horizontal: bool,
+        /// The map the warp draws with: [`WARP_NET`](super::WARP_NET) for its style's Bézier net,
+        /// 0 (as in files from before the version existed) for [`warp_point`](super::warp_point).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        version: u32,
     },
     /// A `(rows+1)×(cols+1)` grid of points (row-major) the content's bounding box maps onto.
     Mesh {
@@ -32,7 +40,14 @@ pub enum EnvelopeKind {
         handles: Vec<[Vec2; 4]>,
     },
     /// The content's bounding box maps onto the outline of this path.
-    TopObject { path: PathData },
+    TopObject {
+        path: PathData,
+        /// The anchors (indices into the outline, the path's largest subpath, in its own order)
+        /// at the top left, top right, bottom right and bottom left corners, as a saved file gives
+        /// them. `None`: the corners are found from the outline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        corners: Option<[u32; 4]>,
+    },
 }
 
 /// Envelope Options → Preserve Shape Using: how a distorted raster keeps the envelope's shape.
@@ -71,7 +86,9 @@ pub struct EnvelopeOptions {
     /// Rasters: Preserve Shape Using.
     pub preserve_shape: PreserveShape,
     /// Distort Appearance: strokes and live effects are applied before the distortion, so they
-    /// bend with the art (off: they apply to the distorted paths).
+    /// bend with the art (off: they apply to the distorted paths). Type's strokes are the exception:
+    /// they paint along its distorted glyph outlines at their own weight either way, as `.ai` files
+    /// draw them (#6644).
     pub distort_appearance: bool,
     /// Distort Linear Gradients (with Distort Appearance): placed gradients bend with the art.
     pub distort_linear_gradients: bool,
@@ -229,6 +246,7 @@ impl TypeInks {
         text.xf = Affine::new([a, b, c, d, 0.0, 0.0]);
         text.cached_bounds = None;
         text.cached_baselines.clear();
+        text.cached_ink = None;
         let content = content_hash(&text).map(|hash| (hash, by_node.1, inputs));
         match content.and_then(|key| self.content.get(&key)) {
             Some(ink) => {
@@ -518,7 +536,7 @@ pub fn envelope_overlay(n: &Node) -> Option<(PathData, Option<GradientMesh>)> {
             Some((grid.lines(), Some(grid)))
         }
         EnvelopeKind::Warp { .. } => Some((EnvelopeMap::of(n)?.surface_mesh(4, 4, Color::BLACK).lines(), None)),
-        EnvelopeKind::TopObject { path } => Some((path.clone(), None)),
+        EnvelopeKind::TopObject { path, .. } => Some((path.clone(), None)),
     }
 }
 
@@ -630,6 +648,7 @@ pub(super) fn expand_envelope(
         hooks,
         options,
         depth: 0,
+        type_outlines: false,
     };
     content.iter().map(|c| map_node(c, &w)).collect()
 }
@@ -642,7 +661,7 @@ pub fn envelope_bounds(content: &[Arc<Node>], kind: &EnvelopeKind, frame: Affine
             let first = *points.first()?;
             Some(points.iter().fold(Rect::from_points(first, first), |r, p| r.union_pt(*p)))
         }
-        EnvelopeKind::TopObject { path } => path.bounds(),
+        EnvelopeKind::TopObject { path, .. } => path.bounds(),
         EnvelopeKind::Warp { .. } => EnvelopeMap::new(content, kind, frame, options)?.bounds(),
     }
 }

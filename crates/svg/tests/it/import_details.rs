@@ -89,6 +89,23 @@ fn a_linked_png_resolves_against_the_svg_folder_and_stays_linked() {
 }
 
 #[test]
+fn hrefs_spelling_one_file_differently_read_it_once() {
+    let dir = folder("spellings");
+    std::fs::write(dir.join("img").join("a.png"), png(4, 4)).unwrap();
+    let reads = std::sync::atomic::AtomicUsize::new(0);
+    let counting = |path: &str| {
+        reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        read(path)
+    };
+    let folder = dir.to_string_lossy();
+    let body = r#"<image href="img/a.png" width="4" height="4"/><image href="./img/a.png" width="4" height="4"/><image href="img/%61.png" width="4" height="4"/>"#;
+    let (d, w) = import_with(&svg(body), &ImportOptions { folder: Some(&folder), read: Some(&counting) }).unwrap();
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(images(&d).len(), 3);
+    assert_eq!(reads.into_inner(), 1, "one read for the three spellings");
+}
+
+#[test]
 fn a_missing_link_warns_and_keeps_a_placeholder_in_its_box() {
     let dir = folder("missing");
     let (d, w) = open_in(&dir, r#"<image href="img/gone.png" x="10" y="20" width="100" height="50"/>"#);
@@ -137,6 +154,26 @@ fn files_with_the_same_pixels_have_keys_of_their_own() {
     assert_eq!(a.key, a2.key, "one file, one key");
     assert_eq!(*d.images[&a.key].bytes, bytes);
     assert_eq!(*d.images[&b.key].bytes, bytes);
+}
+
+#[test]
+fn hrefs_spelling_one_missing_file_differently_each_warn_and_keep_their_own_link() {
+    let dir = folder("missing_twice");
+    let reads = std::sync::atomic::AtomicUsize::new(0);
+    let counting = |path: &str| {
+        reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        read(path)
+    };
+    let folder = dir.to_string_lossy();
+    let body = r#"<image href="img/gone.png" width="4" height="4"/><image href="./img/gone.png" width="4" height="4"/>"#;
+    let (d, w) = import_with(&svg(body), &ImportOptions { folder: Some(&folder), read: Some(&counting) }).unwrap();
+    assert_eq!(w.iter().filter(|w| w.contains("gone.png") && w.contains("not found")).count(), 2, "{w:?}");
+    assert_eq!(reads.into_inner(), 1, "the failed read is cached");
+    let found = images(&d);
+    assert_eq!(found.len(), 2);
+    for (_, im) in found {
+        assert_eq!(Path::new(&im.link.as_ref().unwrap().path), dir.join("img").join("gone.png"));
+    }
 }
 
 #[test]
@@ -546,17 +583,25 @@ fn percentages_in_a_symbol_are_of_its_view_box() {
     assert_similar(&drawing("100%", "100%", "25%", "50%"), &drawing("100", "50", "25", "25"), 24.0, 0.001);
 }
 
-/// #1598: an unsupported filter's warning names the filter, its primitives and the object, and
-/// says it is drawn without it (not "a group": usvg wraps the element in one).
+/// #1598: the warning for a filter that neither the live effects nor an SVG filter effect can hold
+/// (here, on turned objects) names the filter, its primitives and the object, and says it is drawn
+/// without it (not "a group": usvg wraps the element in one). Such a filter on an object that
+/// isn't turned comes in as an SVG filter effect holding the filter's XML.
 #[test]
 fn unsupported_filters_are_named_in_the_warning() {
     let body = r#"<filter id="f"><feColorMatrix type="saturate" values="0"/></filter><filter id="t"><feTurbulence baseFrequency="0.05"/></filter>
-        <rect x="20" y="20" width="60" height="60" fill="red" filter="url(#f)"/>
-        <rect id="r" x="100" y="20" width="60" height="60" fill="blue" filter="url(#t)"/>"#;
+        <rect x="20" y="20" width="60" height="60" fill="red" transform="rotate(10 50 50)" filter="url(#f)"/>
+        <rect id="r" x="100" y="20" width="60" height="60" fill="blue" transform="rotate(10 130 50)" filter="url(#t)"/>
+        <rect x="20" y="90" width="20" height="20" fill="red" filter="url(#f)"/>"#;
     let (d, w) = import_with_report(&svg(body)).unwrap();
     assert!(w.iter().any(|w| w == "filter 'f' (feColorMatrix) on an object isn't supported; drawn without it"), "{w:?}");
     assert!(w.iter().any(|w| w == "filter 't' (feTurbulence) on 'r' isn't supported; drawn without it"), "{w:?}");
-    assert_eq!(art(&d).iter().filter(|n| n.path_data().is_some()).count(), 2, "both drawn");
+    assert_eq!(w.iter().filter(|w| w.contains("filter")).count(), 2, "{w:?}");
+    let kept: Vec<_> = art(&d).into_iter().flat_map(|n| &n.appearance.effects).collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!((kept[0].id.as_str(), &kept[0].params["name"]), ("svg.filter", &serde_json::json!("f")));
+    assert_eq!(kept[0].params["xml"], r#"<filter id="f"><feColorMatrix type="saturate" values="0"/></filter>"#, "as it is written");
+    assert_eq!(art(&d).iter().filter(|n| n.path_data().is_some()).count(), 3, "all drawn");
 }
 
 /// #1601: Inkscape's pages become artboards, at their places (through the viewBox) and with their
@@ -636,4 +681,27 @@ fn nested_svg_images_past_count_cap_are_left_out() {
     let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500">{images}</svg>"#);
     let (_d, warnings) = import_with(&svg, &ImportOptions::default()).unwrap();
     assert!(warnings.iter().any(|w| w.contains(&format!("more than {MAX_NESTED_SVG_IMAGES} nested SVG images"))));
+}
+
+/// #3566: entity references in element content count toward the expansion limit, as in
+/// attributes. A 10 KB entity, a second entity that refers to it 250 times, and eight references
+/// to the second inside `<desc>` would expand to about 20 MB from a file of a few KB: the import
+/// refuses it before the XML reader expands anything. The namespace entities drawing apps write
+/// (`&ns_svg;`) still import.
+#[test]
+fn entities_repeated_in_element_content_are_refused_and_namespace_entities_import() {
+    let bomb = format!(
+        r#"<!DOCTYPE svg [<!ENTITY a "{}"><!ENTITY b "{}">]><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><desc>{}</desc><rect width="5" height="5"/></svg>"#,
+        "x".repeat(10_000),
+        "&a;".repeat(250),
+        "&b;".repeat(8)
+    );
+    assert!(bomb.len() < 20_000, "{} bytes", bomb.len());
+    match import_with(&bomb, &ImportOptions::default()) {
+        Err(SvgError::Parse(e)) => assert!(e.contains("entities"), "{e}"),
+        other => panic!("refused as a parse error, not {:?}", other.map(|(_, w)| w)),
+    }
+    let ns = r#"<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY ns_svg "http://www.w3.org/2000/svg">]><svg xmlns="&ns_svg;" width="10" height="10"><rect width="5" height="5"/></svg>"#;
+    let (d, _) = import_with(ns, &ImportOptions::default()).unwrap();
+    assert_eq!(art(&d).len(), 1, "the rectangle");
 }

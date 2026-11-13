@@ -4,7 +4,7 @@ use super::common::{fix_ids, ids_json, is_mesh, replace_with, roots_param, selec
 use super::envelope::{outline_of, rows_cols};
 use super::{
     Color, Document, EngineError, EnvelopeKind, GradientMesh, MeshAppearance, Node, NodeId, NodeKind, Paint, Point, Result, Session, Value, bad,
-    check_numbers, color_param, f64_or, f64_req, finite_numbers, gradient_sampler, id_param, json, live, ok, str_param,
+    check_numbers, color_param, f64_or, f64_req, finite_numbers, gradient_sampler, json, live, object_param, ok, str_param,
 };
 
 // ---------- Gradient mesh ----------
@@ -49,10 +49,7 @@ pub(super) fn mesh_create(s: &mut Session, p: &Value) -> Result<Value> {
                 match n.appearance.fill_paint() {
                     // The points take the colours the gradient paints there.
                     Paint::Gradient(g) => {
-                        path.bounds().and_then(|b| GradientMesh::for_path_with(&path, rows, cols, &*gradient_sampler(&g, b, model))).map(|mut m| {
-                            m.highlight(app, highlight);
-                            m
-                        })
+                        path.bounds().and_then(|b| GradientMesh::for_path_shaded(&path, rows, cols, &*gradient_sampler(&g, b, model), app, highlight))
                     }
                     p => GradientMesh::for_path(&path, rows, cols, p.color().unwrap_or(Color::WHITE), app, highlight),
                 }
@@ -118,16 +115,21 @@ fn image_mesh(d: &Document, im: &vectorcraft_doc::ImageObject, rows: u32, cols: 
 /// Run `f` on the gradient mesh `p.id` (one undo step `label`); with `envelopes`, a mesh
 /// envelope's grid too (see [`edit_grid`]).
 fn with_mesh<T>(s: &mut Session, p: &Value, cmd: &str, label: &str, envelopes: bool, f: impl FnOnce(&mut GradientMesh) -> Result<T>) -> Result<T> {
-    let id = id_param(p, "id").ok_or_else(|| bad(cmd, "missing `id`"))?;
+    let id = object_param(p, "id", cmd)?.ok_or_else(|| bad(cmd, "missing `id`"))?;
     s.edit(label, move |d, _| edit_grid(d, id, cmd, envelopes, f))
 }
 
 /// Run `f` on the gradient mesh `id` of `d`; with `envelopes`, a mesh envelope's grid too (its
 /// points and handles are written back: editing fills in the handles).
 fn edit_grid<T>(d: &mut Document, id: NodeId, cmd: &str, envelopes: bool, f: impl FnOnce(&mut GradientMesh) -> Result<T>) -> Result<T> {
-    match d.node_mut(id).map(|n| &mut n.kind) {
-        Some(NodeKind::Mesh(m)) => f(m),
-        Some(NodeKind::Envelope { kind, .. }) if envelopes && matches!(**kind, EnvelopeKind::Mesh { .. }) => {
+    edit_kind(&mut d.node_mut(id).ok_or(EngineError::NoNode(id))?.kind, cmd, envelopes, f)
+}
+
+/// [`edit_grid`] on a node's kind.
+fn edit_kind<T>(k: &mut NodeKind, cmd: &str, envelopes: bool, f: impl FnOnce(&mut GradientMesh) -> Result<T>) -> Result<T> {
+    match k {
+        NodeKind::Mesh(m) => f(m),
+        NodeKind::Envelope { kind, .. } if envelopes && matches!(**kind, EnvelopeKind::Mesh { .. }) => {
             let EnvelopeKind::Mesh { rows, cols, points, handles } = &mut **kind else {
                 return Err(bad(cmd, "not a gradient mesh or mesh envelope"));
             };
@@ -138,8 +140,7 @@ fn edit_grid<T>(d: &mut Document, id: NodeId, cmd: &str, envelopes: bool, f: imp
             *handles = m.points.iter().map(|q| q.handles).collect();
             Ok(r)
         }
-        Some(_) => Err(bad(cmd, if envelopes { "not a gradient mesh or mesh envelope" } else { "not a gradient mesh" })),
-        None => Err(EngineError::NoNode(id)),
+        _ => Err(bad(cmd, if envelopes { "not a gradient mesh or mesh envelope" } else { "not a gradient mesh" })),
     }
 }
 
@@ -150,7 +151,7 @@ const MAX_POINTS: usize = 1 << 20;
 /// points}…]}`. Each mesh comes once, with its points in order and without repeats.
 fn point_items(p: &Value, cmd: &str) -> Result<Vec<(NodeId, BTreeSet<usize>)>> {
     let one = |q: &Value| -> Result<(NodeId, BTreeSet<usize>)> {
-        let id = id_param(q, "id").ok_or_else(|| bad(cmd, "missing `id`"))?;
+        let id = object_param(q, "id", cmd)?.ok_or_else(|| bad(cmd, "missing `id`"))?;
         let points = match q.get("points") {
             None | Some(Value::Null) => BTreeSet::from([index_param(q, "index", cmd)?]),
             Some(Value::Array(v)) if v.len() <= MAX_POINTS => v
@@ -284,11 +285,40 @@ pub(super) fn mesh_add_line(s: &mut Session, p: &Value) -> Result<Value> {
     check_numbers(p, &["tolerance"], C)?;
     let tol = f64_or(p, "tolerance", 0.0).max(0.0);
     let color = color_param(p, "color", C)?.map(|c| crate::cmd::paint::new_color(s, p, c));
-    let index = with_mesh(s, p, C, "Add Mesh Line", true, |m| {
+    let add = move |m: &mut GradientMesh| {
         let i = m.add_lines_at(q, tol).ok_or_else(|| bad(C, "point is outside the mesh"))?;
         if let Some(c) = color {
             m.points[i].color = c;
         }
+        Ok(i)
+    };
+    let id = object_param(p, "id", C)?.ok_or_else(|| bad(C, "missing `id`"))?;
+    if s.script_running() {
+        return Err(EngineError::Busy);
+    }
+    // The lines are added to a copy of the object. A point that is already a mesh point adds none:
+    // when its color stays too, nothing changes and no undo step is recorded. The grid is compared,
+    // not the node: a mesh envelope stored without handles takes them in any edit, and keeps no
+    // colors, so only its points and handles count.
+    let orig = s.doc()?.doc.node(id).ok_or(EngineError::NoNode(id))?.kind.clone();
+    let colored = matches!(orig, NodeKind::Mesh(_));
+    let mut kind = orig.clone();
+    let (i, same) = edit_kind(&mut kind, C, true, |m| {
+        let before = m.clone();
+        let i = add(m)?;
+        let shape = |g: &GradientMesh| (g.rows, g.cols, g.points.iter().map(|q| (q.p, q.handles)).collect::<Vec<_>>());
+        Ok((i, if colored { *m == before } else { shape(m) == shape(&before) }))
+    })?;
+    if same {
+        return Ok(json!({ "index": i }));
+    }
+    let index = s.edit("Add Mesh Line", move |d, _| {
+        let n = d.node_mut(id).ok_or(EngineError::NoNode(id))?;
+        // Settling typed values before the edit may have changed the object: add the lines again.
+        if n.kind != orig {
+            return edit_kind(&mut n.kind, C, true, add);
+        }
+        n.kind = kind;
         Ok(i)
     })?;
     Ok(json!({ "index": index }))

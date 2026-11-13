@@ -1,5 +1,5 @@
 use super::fonts::MAX_RECENT_FONTS;
-use super::{Value, VectorcraftApp, dialogs, fileio, io, menus, panels, picks, toolbar};
+use super::{Value, VectorcraftApp, canvas, dialogs, fileio, io, menus, panels, picks, toolbar};
 use crate::placing;
 use crate::state::ReplaceFontWarning;
 
@@ -73,6 +73,8 @@ fn substitute_warnings_follow_current_font_inventory() {
 impl VectorcraftApp {
     /// Run a UI or engine command by id. The single entry point for every frontend path.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        self.beacon.command(id);
+        let touch_workspace = self.session.prefs.touch_workspace;
         // A file dialog it shows off the UI thread runs it again with the path picked.
         let result = if self.picks.is_entry_free() {
             let entry = picks::Entry::Command(id.to_string(), params.clone());
@@ -80,6 +82,9 @@ impl VectorcraftApp {
         } else {
             self.run_now(id, params)
         };
+        if id == "prefs.import" && result.is_ok() {
+            crate::prefs_dialog::imported(self, touch_workspace);
+        }
         placing::settle_swatch_paste(self);
         result
     }
@@ -94,6 +99,41 @@ impl VectorcraftApp {
         result
     }
 
+    /// A command that waits for the edit the tool computes on another thread and the input held
+    /// for it waits before the app adds the view's active artboard to its params: a held press
+    /// may change it. The app's own commands (its dialogs, panels and view) wait too.
+    fn wait_for_tool_edit(&mut self, id: &str) {
+        let ui_command = vectorcraft_engine::find_command(id).is_none();
+        if (ui_command || vectorcraft_engine::waits_for_tool_edit(id)) && self.session.tool_waiting() {
+            let r = self.session.finish_tool_edit();
+            canvas::apply_requests(self, r);
+        }
+    }
+
+    /// Paste in place, in front and in back (#693), Select › All on Active Artboard (#1006), and Align,
+    /// Distribute Objects and Distribute Spacing with Align to Artboard, and Edit Symbol from the Symbols
+    /// panel act on the active artboard, the view's, which the app adds to command `id`'s `params` as
+    /// `artboard`. A batch passes it on to those steps. While the Artboard tool has several artboards
+    /// selected, the paste commands get those as `artboards` instead, and paste a copy on each; in a
+    /// document without artboards they get neither.
+    fn add_active_artboard(&self, id: &str, params: &mut Value) {
+        let paste = matches!(id, "edit.pasteInPlace" | "edit.pasteInFront" | "edit.pasteInBack");
+        if (vectorcraft_engine::ON_ACTIVE_ARTBOARD.contains(&id) || id == "command.batch")
+            && params.get("artboard").is_none()
+            && !(paste && params.get("artboards").is_some())
+            && self.view().is_some()
+            && let Some(n) = self.session.active().map(|d| d.doc.artboards.len()).filter(|n| *n > 0 || !paste)
+            && let Some(p) = params.as_object_mut()
+        {
+            let picked = panels::artboards::picked(self, n);
+            if paste && picked.len() > 1 {
+                p.insert("artboards".into(), serde_json::json!(picked));
+            } else {
+                p.insert("artboard".into(), serde_json::json!(panels::artboards::selected(self, n)));
+            }
+        }
+    }
+
     /// [`Self::run`] it, inside what asks for file dialogs.
     fn run_now(&mut self, id: &str, params: Value) -> Result<Value, String> {
         crate::state::sync_zoom_stops_display_print_size(self.session.prefs.display_print_size);
@@ -104,27 +144,18 @@ impl VectorcraftApp {
         if cfg!(debug_assertions) && !self.session.replaying() {
             menus::check_params(&self.session, id, &params)?;
         }
+        self.wait_for_tool_edit(id);
         // A `.ai` file a command writes (a save, an export, a timestamped copy, a batch's save) names
         // the view's active artboard.
         io::remember_active_artboard(self);
         let artboards = self.artboard_tool_state();
         if let Some(r) = menus::run_ui_command(self, id, &params) {
+            self.ui.recording_base = None;
             self.follow_artboard_tool(artboards);
             return r;
         }
         let mut params = params;
-        // Paste in place, in front and in back (#693), Select › All on Active Artboard (#1006), and Align,
-        // Distribute Objects and Distribute Spacing with Align to Artboard, and Edit Symbol from the Symbols
-        // panel act on the active artboard, the view's, which the app passes as `artboard`. A batch passes
-        // it on to those steps.
-        if (vectorcraft_engine::ON_ACTIVE_ARTBOARD.contains(&id) || id == "command.batch")
-            && params.get("artboard").is_none()
-            && self.view().is_some()
-            && let Some(n) = self.session.active().map(|d| d.doc.artboards.len())
-            && let Some(p) = params.as_object_mut()
-        {
-            p.insert("artboard".into(), serde_json::json!(panels::artboards::selected(self, n)));
-        }
+        self.add_active_artboard(id, &mut params);
         // Edit Symbol from the Symbols panel in a document without artboards centers the symbol's
         // art in the view, whose center the app passes as `viewCenter`, to a batch's symbol.edit
         // steps too.
@@ -191,6 +222,15 @@ impl VectorcraftApp {
         if fileio::SaveMode::of(id).is_some() {
             io::remember_view(self);
         }
+        // While an action records, a command that the recording would keep as a step runs only
+        // when the step fits in the action.
+        let recorded = match panels::actions::before_recorded_command(self, id, &params) {
+            Ok(recorded) => recorded,
+            Err(e) => {
+                self.ui.status = e.clone();
+                return Err(e);
+            }
+        };
         // A command that changes the edited text is an application edit (undo, a panel or menu
         // edit, a control request). Capture the bounded committed context around it so `Other`
         // dominates the frame even if an IME receipt follows. Selection/view commands that leave
@@ -200,6 +240,7 @@ impl VectorcraftApp {
         let ime_before = crate::ime::stamp(&mut self.session, ime_view);
         let cursor_settings = (self.session.caps_lock, self.session.prefs.use_precise_cursors);
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
+        let r = panels::actions::after_recorded_command(self, recorded, r);
         if r.is_ok() && cursor_settings != (self.session.caps_lock, self.session.prefs.use_precise_cursors) {
             self.canvas.hover_cursor = None;
         }
@@ -250,7 +291,7 @@ impl VectorcraftApp {
                         let to = &params["to"];
                         to["family"].as_str().and_then(|family| {
                             let style = to["style"].as_str().unwrap_or("Regular");
-                            vectorcraft_text::FontDb::global().resolve(family, style).map(|(face, _)| face.family.clone())
+                            vectorcraft_text::FontDb::global().stored_family(family, style)
                         })
                     }
                     _ => None,
@@ -391,6 +432,10 @@ impl VectorcraftApp {
         let switched = if fresh { self.session.select_tool(id, v) } else { self.session.switch_tool(id, v) };
         if let Err(e) = switched {
             self.ui.status = e.to_string();
+        }
+        if before != self.session.tool_id() {
+            // A control gesture cannot resume after another tool has owned the pointer.
+            self.control_rotate_press = None;
         }
         // A newly chosen Artboard tool starts on the active artboard (the view's).
         if before != "artboard"

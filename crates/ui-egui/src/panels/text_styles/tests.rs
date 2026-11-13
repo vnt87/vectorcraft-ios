@@ -261,6 +261,66 @@ fn click_label(ctx: &egui::Context, app: &mut VectorcraftApp, label: &str, mut d
     app.run_count.wrapping_sub(before)
 }
 
+/// Double-clicking a user style's row opens its Character or Paragraph Style Options once: the
+/// first click applies the style to the selected text, the second opens the dialog without applying
+/// it again.
+#[test]
+fn double_clicking_a_character_style_row_opens_its_options() {
+    for kind in [Kind::Char, Kind::Para] {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 200, "height": 150})).unwrap();
+        let id = app.run("text.create", json!({"x": 20, "y": 40, "text": "Hi"})).unwrap()["id"].clone();
+        app.run("select.set", json!({"ids": [id]})).unwrap();
+        app.run(&format!("{}.new", kind.prefix()), json!({"name": "Body"})).unwrap();
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        let mut draw = |app: &mut VectorcraftApp, ui: &mut egui::Ui| show(app, ui, kind);
+        frame_events(&ctx, &mut app, vec![], &mut draw);
+        let texts = frame_events(&ctx, &mut app, vec![], &mut draw);
+        let pos = text_rect(&texts, "Body").center();
+        let before = app.run_count;
+        click(&ctx, &mut app, pos, &mut draw);
+        click(&ctx, &mut app, pos, &mut draw);
+        let dialog = app.ui.dialog.as_ref();
+        if kind == Kind::Char {
+            let d = dialog.expect("double-clicking a Character Style's row opens its options");
+            assert_eq!(d.kind, "charStyleOptions");
+            assert_eq!(d.str("__style"), "Body");
+            // One apply from the first click and the dialog from the second: no second apply.
+            assert_eq!(app.run_count.wrapping_sub(before), 2, "one apply and the dialog");
+        } else {
+            let d = dialog.expect("double-clicking a Paragraph Style's row opens its options");
+            assert_eq!(d.kind, "paraStyleOptions");
+            assert_eq!(d.str("__style"), "Body");
+            assert_eq!(d.str("section"), "general");
+            // One apply from the first click and the dialog from the second.
+            assert_eq!(app.run_count.wrapping_sub(before), 2, "one apply and the dialog");
+        }
+    }
+}
+
+/// A double-click on the built-in Normal style opens no options, and its second click applies it
+/// only once, as a user style's does.
+#[test]
+fn double_clicking_the_normal_style_opens_no_options() {
+    let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 200, "height": 150})).unwrap();
+    let id = app.run("text.create", json!({"x": 20, "y": 40, "text": "Hi"})).unwrap()["id"].clone();
+    app.run("select.set", json!({"ids": [id]})).unwrap();
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let mut draw = |app: &mut VectorcraftApp, ui: &mut egui::Ui| show(app, ui, Kind::Char);
+    frame_events(&ctx, &mut app, vec![], &mut draw);
+    let texts = frame_events(&ctx, &mut app, vec![], &mut draw);
+    let normal = texts.iter().find(|(text, _)| text.contains("Normal")).map(|(_, r)| r.center());
+    let pos = normal.expect("the Normal style's row is drawn");
+    let before = app.run_count;
+    click(&ctx, &mut app, pos, &mut draw);
+    click(&ctx, &mut app, pos, &mut draw);
+    assert!(app.ui.dialog.is_none(), "the Normal style has no Character Style Options");
+    assert_eq!(app.run_count.wrapping_sub(before), 1, "the second click applies nothing");
+}
+
 /// The panel menu's Duplicate highlights the copy and its Delete clears the highlight, as the
 /// panel's New and Delete buttons do; after a menu delete, Duplicate runs nothing.
 #[test]
@@ -947,11 +1007,15 @@ fn new_character_style_without_selection_uses_japanese_defaults() {
     assert!(!crate::dialogs::char_style_options::edited_attrs(dialog).unwrap().contains_key("charAlign"));
     crate::dialogs::cancel(&mut app);
 
+    let defaults = vectorcraft_engine::cmd::textstyles::default_new_style_attrs(&app.session, true);
     crate::dialogs::new_text_style::open(&mut app, true, json!({})).unwrap();
-    let dialog = app.ui.dialog.as_ref().unwrap();
-    assert!(dialog.fields["__target"].get("attrs").is_none());
-    assert!(dialog.fields.get("__attrs").is_none());
-    crate::dialogs::cancel(&mut app);
+    let dialog = app.ui.dialog.as_mut().unwrap();
+    assert_eq!(dialog.fields["__target"]["attrs"], Value::Object(defaults.clone()));
+    assert_eq!(crate::dialogs::para_style_options::edited_attrs(dialog).unwrap(), defaults);
+    dialog.fields.insert("name".into(), json!("Lead"));
+    crate::dialogs::confirm(&mut app).unwrap();
+    let style = app.session.doc().unwrap().doc.para_styles.iter().find(|style| style.name == "Lead").unwrap();
+    assert_eq!(style.attrs, defaults, "the new style has the paragraph defaults for the interface language");
 }
 
 /// The dialog highlights its new style and scrolls the matching panel to its row.

@@ -15,6 +15,7 @@ pub mod character;
 pub mod color;
 pub mod color_guide;
 pub mod color_themes;
+pub mod color_wheel;
 pub mod css_properties;
 pub mod doc_info;
 pub mod flattener_preview;
@@ -25,6 +26,7 @@ pub mod history;
 pub mod image_trace;
 pub mod info;
 pub mod layers;
+pub mod learn;
 pub mod libraries;
 pub mod library_panel;
 pub mod links;
@@ -36,6 +38,7 @@ pub mod paragraph;
 pub mod pathfinder;
 pub mod pattern_options;
 pub mod properties;
+pub mod script_console;
 pub mod separations;
 pub mod stroke;
 pub mod svg_interactivity;
@@ -177,10 +180,13 @@ pub fn show_icon_panel(app: &mut VectorcraftApp, ui: &mut Ui, id: &str) {
         svg_interactivity::ID => svg_interactivity::show(app, ui),
         variables::ID => variables::show(app, ui),
         "colorThemes" => color_themes::show(app, ui),
+        color_wheel::ID => color_wheel::show(app, ui),
         links::ID => links::show(app, ui),
         asset_export::ID => asset_export::show(app, ui),
         css_properties::ID => css_properties::show(app, ui),
         three_d::ID => three_d::show(app, ui),
+        script_console::ID => script_console::show(app, ui),
+        learn::ID => learn::show(app, ui),
         crate::addons::cleanup::ID => crate::addons::cleanup::show(app, ui),
         crate::addons::color::ID => crate::addons::color::show(app, ui),
         crate::addons::pathtools::ID => crate::addons::pathtools::show(app, ui),
@@ -236,6 +242,7 @@ pub fn panel_menu_items(app: &mut VectorcraftApp, ui: &mut Ui, id: &str) -> bool
         asset_export::ID => asset_export::menu(app, ui),
         css_properties::ID => css_properties::menu(app, ui),
         variables::ID => variables::menu(app, ui),
+        script_console::ID => script_console::menu(app, ui),
         "actions" => actions::menu(app, ui),
         id if library_panel::parse(id).is_some() => library_panel::menu(app, ui, id),
         _ => return false,
@@ -521,7 +528,8 @@ pub(crate) fn label_or_name(s: &str, built_in: bool) -> &str {
 
 /// "Recent Colors" header + rows of chips (the Session's recent colours, which every paint
 /// command feeds), wrapped onto as many rows as the panel's width needs; returns the one clicked,
-/// for the caller to apply.
+/// for the caller to apply. A chip drags its color as a solid paint, which the Swatches panel
+/// makes a swatch of.
 pub(crate) fn recent_colors_row(app: &VectorcraftApp, ui: &mut Ui) -> Option<Color> {
     let t = Tokens::get(ui.ctx());
     crate::widgets::subheader(ui, tl!("Recent Colors"));
@@ -536,7 +544,8 @@ pub(crate) fn recent_colors_row(app: &VectorcraftApp, ui: &mut Ui) -> Option<Col
     for (i, c) in colors.iter().enumerate() {
         let (row, col) = (i / per_row, i % per_row);
         let cell = Rect::from_min_size(r.min + vec2(3.0 + col as f32 * 19.0, 3.0 + row as f32 * 19.0), vec2(16.0, 16.0));
-        let resp = ui.interact(cell, ui.scope_id().with(("recent", i)), Sense::click());
+        let resp = ui.interact(cell, ui.scope_id().with(("recent", i)), Sense::click_and_drag());
+        crate::widgets::drag_source(ui, &resp, || crate::widgets::PanelDrag::paint(Paint::solid(*c)));
         crate::widgets::swatch_tile(ui, cell, &Paint::solid(*c), false, resp.hovered());
         if resp.on_hover_text(c.to_hex()).clicked() {
             chosen = Some(*c);
@@ -655,6 +664,8 @@ mod tests_blend;
 #[cfg(test)]
 mod tests_brush_libraries;
 #[cfg(test)]
+mod tests_color_wheel;
+#[cfg(test)]
 mod tests_constrain;
 #[cfg(test)]
 mod tests_css_properties;
@@ -670,6 +681,8 @@ mod tests_links;
 mod tests_long_popups;
 #[cfg(test)]
 mod tests_maskview;
+#[cfg(test)]
+mod tests_script_console;
 #[cfg(test)]
 mod tests_stroke;
 #[cfg(test)]

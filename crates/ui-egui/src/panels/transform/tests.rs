@@ -32,6 +32,26 @@ fn use_preview_bounds_shows_the_visual_size_and_checks_the_align_flyout() {
     assert!(texts(&mut app, crate::panels::align::menu).iter().any(|t| t == "✓ Use Preview Bounds"));
 }
 
+/// The panel menu's Measure Type by Glyph Bounds is checked while `typeGlyphBounds` is on, and the
+/// bounding box of selected point type then measures its glyphs without a change to the document.
+#[test]
+fn measure_type_by_glyph_bounds_is_checked_and_resizes_the_box() {
+    let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 300, "height": 300})).unwrap();
+    app.run("text.create", json!({"x": 20, "y": 200, "size": 100, "text": "Hg"})).unwrap();
+    assert!(texts(&mut app, menu).iter().any(|t| t == "   Measure Type by Glyph Bounds"));
+    let em = app.selection_box().unwrap().rect;
+    let revision = app.session.active().unwrap().revision;
+    set_pref(&mut app, "typeGlyphBounds", true);
+    assert!(app.session.prefs.type_glyph_bounds);
+    assert!(texts(&mut app, menu).iter().any(|t| t == "✓ Measure Type by Glyph Bounds"));
+    assert_eq!(app.session.active().unwrap().revision, revision);
+    let glyphs = app.selection_box().unwrap().rect;
+    assert!(glyphs.height() < em.height() - 10.0, "{glyphs:?} inside {em:?}");
+    set_pref(&mut app, "typeGlyphBounds", false);
+    assert_eq!(app.selection_box().unwrap().rect, em);
+}
+
 #[test]
 fn use_preview_bounds_shows_the_size_after_geometry_effects() {
     // A 100 × 50 rectangle without a stroke, with Offset Path 10: 120 × 70 as drawn.
@@ -502,4 +522,79 @@ fn rotate_and_shear_fields_are_named() {
     h.run_steps(3);
     let _ = h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Rotate");
     let _ = h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Shear");
+}
+
+/// The Align to Pixel Grid checkbox turns the selected paths' pixel-aligned property on, shows a
+/// dash when they differ (a click then turns it on for both), turns it off when it is on for all,
+/// and is unavailable with type selected.
+#[test]
+fn align_to_pixel_grid_shows_and_sets_the_property() {
+    use crate::panels::tests_appearance::{click, frame_events, text_rect};
+    let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+    app.run("file.new", json!({"width": 300, "height": 300})).unwrap();
+    let a = app.run("shape.rectangle", json!({"x": 10.3, "y": 20.6, "width": 30.4, "height": 9.7})).unwrap()["id"].as_u64().unwrap();
+    let b = app.run("shape.rectangle", json!({"x": 60.3, "y": 20.6, "width": 30.4, "height": 9.7})).unwrap()["id"].as_u64().unwrap();
+    app.run("select.set", json!({"ids": [a, b]})).unwrap();
+    let aligned = |app: &VectorcraftApp, id: u64| app.session.active().unwrap().doc.node(vectorcraft_doc::NodeId(id)).unwrap().extras().pixel_aligned;
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let toggle = |ctx: &egui::Context, app: &mut VectorcraftApp| {
+        let texts = frame_events(ctx, app, vec![], show);
+        click(ctx, app, text_rect(&texts, "Align to Pixel Grid").center(), show);
+    };
+    assert_eq!(pixel_aligned_state(&app).map(|s| (s.0, s.1)), Some((Some(false), true)));
+    toggle(&ctx, &mut app);
+    assert!(aligned(&app, a) && aligned(&app, b));
+    let x0 = app.session.active().unwrap().doc.node(vectorcraft_doc::NodeId(a)).unwrap().geometric_bounds().unwrap().x0;
+    // The default 1 pt stroke is odd and centered: the edges go to half points.
+    assert_eq!(x0, 10.5);
+    app.run("object.setPixelAligned", json!({"ids": [b], "on": false})).unwrap();
+    assert_eq!(pixel_aligned_state(&app).map(|s| s.0), Some(None));
+    toggle(&ctx, &mut app);
+    assert!(aligned(&app, a) && aligned(&app, b));
+    toggle(&ctx, &mut app);
+    assert!(!aligned(&app, a) && !aligned(&app, b));
+    let t = app.run("text.create", json!({"x": 10, "y": 100, "text": "Hi"})).unwrap()["id"].as_u64().unwrap();
+    app.run("select.set", json!({"ids": [a, t]})).unwrap();
+    assert_eq!(pixel_aligned_state(&app).map(|s| s.1), Some(false));
+    toggle(&ctx, &mut app);
+    assert!(!aligned(&app, a));
+    // A path inside a compound path snaps with the compound path, so it cannot be aligned alone.
+    app.run("select.set", json!({"ids": [a, b]})).unwrap();
+    let c = app.run("object.compoundPath.make", json!({})).unwrap()["id"].as_u64().unwrap();
+    assert_eq!(pixel_aligned_state(&app).map(|s| s.1), Some(true));
+    let member = app.session.active().unwrap().doc.node(vectorcraft_doc::NodeId(c)).unwrap().children().unwrap()[0].id.0;
+    app.run("select.set", json!({"ids": [member]})).unwrap();
+    assert_eq!(pixel_aligned_state(&app).map(|s| s.1), Some(false));
+}
+
+/// The panel menu's Align New Objects to Pixel Grid shows and toggles the active document's
+/// setting, follows a switch to another document, and is unavailable with no document open.
+#[test]
+fn align_new_objects_menu_item_toggles_the_active_document() {
+    let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx);
+    let item = "Align New Objects to Pixel Grid";
+    let shown =
+        |ctx: &egui::Context, app: &mut VectorcraftApp| menu_texts(ctx, app).into_iter().find(|t| t.trim_start_matches('✓').trim_start() == item);
+    assert!(shown(&ctx, &mut app).is_some_and(|t| !t.starts_with('✓')), "no document");
+    menu_click(&ctx, &mut app, item);
+    assert!(app.session.active().is_none());
+    app.run("file.new", json!({"width": 300, "height": 300})).unwrap();
+    app.run("file.new", json!({"preset": "Web 1920×1080"})).unwrap();
+    let on = |app: &VectorcraftApp, i: usize| app.session.documents()[i].doc.setup.align_new_objects_to_pixel_grid;
+    assert_eq!((on(&app, 0), on(&app, 1)), (false, true));
+    assert!(shown(&ctx, &mut app).is_some_and(|t| t.starts_with('✓')), "the Web document");
+    app.session.set_active(0);
+    assert!(shown(&ctx, &mut app).is_some_and(|t| !t.starts_with('✓')), "the Letter-sized document");
+    menu_click(&ctx, &mut app, item);
+    assert_eq!((on(&app, 0), on(&app, 1)), (true, true));
+    assert!(shown(&ctx, &mut app).is_some_and(|t| t.starts_with('✓')));
+    let r = app.run("shape.rectangle", json!({"x": 10.3, "y": 20.6, "width": 30.4, "height": 9.7})).unwrap();
+    let id = vectorcraft_doc::NodeId(r["id"].as_u64().unwrap());
+    assert!(app.session.active().unwrap().doc.node(id).unwrap().extras().pixel_aligned);
+    app.session.set_active(1);
+    menu_click(&ctx, &mut app, item);
+    assert_eq!((on(&app, 0), on(&app, 1)), (true, false));
 }

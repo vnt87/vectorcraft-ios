@@ -1,7 +1,7 @@
 use super::exporter::{UNDECODED, address, blend, color, constant_mask, cover, in_range, norm, rects_overlap, rule, to_path, writable, xf};
 use super::{
-    Affine, AppearanceItem, BezPath, BlendMode, Exporter, Fill, FillRule, LineCap, LineJoin, Mark, Node, NodeKind, NormalizedF32, Paint, Path, Rect,
-    Shape, Stroke, StrokeAlign, StrokeDash, StrokeLayer, Surface, WrittenShape, krilla, stroke,
+    Affine, AppearanceItem, BezPath, BlendMode, Exporter, Fill, FillRule, GradientKind, LineCap, LineJoin, Mark, Node, NodeKind, NormalizedF32,
+    Paint, Path, Rect, Shape, Stroke, StrokeAlign, StrokeDash, StrokeLayer, Surface, WrittenShape, krilla, stroke,
 };
 
 /// An object's visual box for leaving out what is off the page. A plain group or layer also holds
@@ -22,8 +22,10 @@ impl Exporter<'_> {
     /// Opacity mask → luminosity soft mask. Outside the art the backdrop is black (clip) or white;
     /// invert is a white Difference rect on top (luminance is linear, so luma(1 − c) = 1 − luma(c)).
     fn soft_mask(&mut self, s: &mut Surface, m: &vectorcraft_doc::OpacityMask, page: Rect) -> Option<krilla::mask::Mask> {
+        let transform = s.group_transform();
         let mut sb = s.stream_builder();
-        let mut ms = sb.surface();
+        let mut ms = Surface::stream(sb.surface());
+        ms.push_transform(&transform);
         // An opaque backdrop when it matters: white outside the art (no clip), or black for the
         // inverting Difference pass below to turn white.
         if !m.clip || m.invert {
@@ -39,6 +41,8 @@ impl Exporter<'_> {
         self.image_left_out = image_left_out.map(|outer| outer || incomplete);
         (self.knockout, self.overprint) = (knockout, overprint);
         if incomplete {
+            ms.pop();
+            ms.finish();
             return None;
         }
         if m.invert {
@@ -46,6 +50,7 @@ impl Exporter<'_> {
             cover(&mut ms, page, 255, 1.0);
             ms.pop();
         }
+        ms.pop();
         ms.finish();
         Some(krilla::mask::Mask::new(sb.finish(), krilla::mask::MaskType::Luminosity))
     }
@@ -96,20 +101,26 @@ impl Exporter<'_> {
             s.opacity = 1.0;
             s
         };
+        let transform = s.group_transform();
         let mut sb = s.stream_builder();
-        let mut ms = sb.surface();
+        let mut ms = Surface::stream(sb.surface());
+        ms.push_transform(&transform);
         cover(&mut ms, page, 255, 1.0);
         let alpha = {
+            let transform = ms.group_transform();
             let mut ab = ms.stream_builder();
-            let mut als = ab.surface();
+            let mut als = Surface::stream(ab.surface());
+            als.push_transform(&transform);
             let overprint = std::mem::take(&mut self.overprint);
             self.measured_node(&mut als, &shape, page, false, Some(measured));
             self.overprint = overprint;
+            als.pop();
             als.finish();
             krilla::mask::Mask::new(ab.finish(), krilla::mask::MaskType::Alpha)
         };
         ms.push_mask(alpha);
         cover(&mut ms, page, 0, 1.0);
+        ms.pop();
         ms.pop();
         ms.finish();
         krilla::mask::Mask::new(sb.finish(), krilla::mask::MaskType::Luminosity)
@@ -238,8 +249,9 @@ impl Exporter<'_> {
                 self.shape(s, n, &bp, *rule, page);
             }
             NodeKind::Text(t) => self.text(s, n, t, page),
-            NodeKind::Image(im) => match n.extras().colorize.as_deref() {
-                Some(p @ Paint::Solid { .. }) if self.doc.image_blob(im).is_none_or(vectorcraft_doc::ImageBlob::takes_colorize) => {
+            NodeKind::Image(im) => match (n.extras().colorize.as_deref(), self.doc.shown_image(n, im)) {
+                (Some(p @ Paint::Solid { .. }), im) if self.doc.image_blob(&im).is_none_or(vectorcraft_doc::ImageBlob::takes_colorize) => {
+                    let im = &*im;
                     if writable(s, im.xf, Rect::new(0.0, 0.0, im.width.max(1).into(), im.height.max(1).into())) {
                         if let Some(colorized) = self.colorized_image(im, p, !n.extras().pixelated) {
                             self.image(s, im, Some(colorized), n.extras().pixelated);
@@ -252,7 +264,7 @@ impl Exporter<'_> {
                         self.warn(super::exporter::UNWRITABLE_IMAGE);
                     }
                 }
-                _ => self.image(s, im, alpha, n.extras().pixelated),
+                (_, im) => self.image(s, &im, alpha, n.extras().pixelated),
             },
             NodeKind::SymbolInstance { symbol, xf } => {
                 // Within the objects a frame may draw of symbol instances, as on screen: nested
@@ -272,20 +284,23 @@ impl Exporter<'_> {
                     let count = art.count() as u64;
                     let map = doc.symbol_slice_map(symbol, *xf);
                     let most = map.map_or(count, |m| m.most_placed(art, doc));
-                    let placed = vectorcraft_doc::charge_symbol_art(&mut self.symbol_nodes, most, || {
-                        let art = match map {
-                            Some(m) => m.place(art, doc),
-                            None => {
-                                let mut a = art.clone();
-                                a.transform(*xf, false);
-                                a
-                            }
-                        };
-                        // As `most_placed`, placed art counts its opacity-mask art.
-                        let count = if map.is_some() { art.count_with_masks() } else { art.count() } as u64;
-                        (art, count)
+                    let within = self.symbol_nodes.saturating_add(most) <= self.symbol_limit;
+                    let placed = within.then(|| {
+                        vectorcraft_doc::charge_symbol_art(&mut self.symbol_nodes, most, || {
+                            let art = match map {
+                                Some(m) => m.place(art, doc),
+                                None => {
+                                    let mut a = art.clone();
+                                    a.transform(*xf, false);
+                                    a
+                                }
+                            };
+                            // As `most_placed`, placed art counts its opacity-mask art.
+                            let count = if map.is_some() { art.count_with_masks() } else { art.count() } as u64;
+                            (art, count)
+                        })
                     });
-                    if let Some(art) = placed {
+                    if let Some(art) = placed.flatten() {
                         self.node(s, &art, page, true);
                     }
                 }
@@ -304,6 +319,8 @@ impl Exporter<'_> {
                     self.node(s, c, page, false);
                 }
             }
+            // Ruler guides draw on screen only.
+            NodeKind::RulerGuide { .. } => {}
         }
         self.knockout = enclosing;
         for _ in 0..pushes {
@@ -417,20 +434,31 @@ impl Exporter<'_> {
     /// Is `p` a paint PDF has no paint for when it paints a fill (`fill`) or a stroke, which
     /// [`Self::area`] draws as art: a pattern swatch or a gradient drawn as pixels
     /// ([`vectorcraft_color::GradientPaint::draws_as_pixels`]), but not a Perceptual one of spot
-    /// inks ([`Self::perceptual_spot`])?
+    /// inks ([`Self::perceptual_spot`]), a conic gradient that can't be a sweep shading (in
+    /// PDF/A, or with more than [`super::paint::MAX_SWEEP_STOPS`] stops), a diamond gradient
+    /// (four linear gradients, [`Self::diamond`]), or a linear or radial gradient that repeats or
+    /// reflects (its stops repeated over the area, [`Self::padded`])?
     pub(super) fn area_paint(&self, p: &Paint, fill: bool) -> bool {
         match p {
             Paint::Pattern { pattern, .. } => self.doc.pattern(pattern).is_some(),
-            Paint::Gradient(g) => g.draws_as_pixels(fill) && !self.perceptual_spot(g, fill),
+            Paint::Gradient(g) => {
+                let sweep_unwritable = || !self.sweeps || g.gradient.expanded().nth(super::paint::MAX_SWEEP_STOPS).is_some();
+                (g.draws_as_pixels(fill) && !self.perceptual_spot(g, fill))
+                    || (g.gradient.kind == GradientKind::Conic && sweep_unwritable())
+                    || g.gradient.kind == GradientKind::Diamond
+                    || (g.gradient.is_spread() && matches!(g.gradient.kind, GradientKind::Linear | GradientKind::Radial))
+            }
             _ => false,
         }
     }
 
     /// Paint the area `clip` (filled by `rule`; bounds `area`) with `p` at `transparency` (opacity,
     /// blend mode) when it is an [area paint](Self::area_paint) of a fill (`fill`) or a stroke: a
-    /// pattern's [tiling pattern](Self::tiling) (else its tile instances covering it), or an image
-    /// of a gradient drawn as pixels placed on `bounds` (the painted object's box, as on the
-    /// canvas), clipped to it. False (nothing drawn) for other paints.
+    /// pattern's [tiling pattern](Self::tiling) (else its tile instances covering it), a diamond
+    /// gradient's four linear gradients, a repeating or reflecting linear or radial gradient's
+    /// stops repeated over `area`, or an image of a gradient drawn as pixels, placed on
+    /// `bounds` (the painted object's box, as on the canvas), clipped to it. False (nothing drawn)
+    /// for other paints.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn area(
         &mut self,
@@ -478,7 +506,14 @@ impl Exporter<'_> {
                         }
                     }
                 }
-                Paint::Gradient(g) => self.field_image(s, g, bounds, area, fill),
+                Paint::Gradient(g) => {
+                    let pixels = g.draws_as_pixels(fill) && !self.perceptual_spot(g, fill);
+                    // A linear or radial gradient that repeats or reflects is drawn by `padded`.
+                    let drawn = !pixels && self.padded(s, g, bounds, area);
+                    if !drawn && (pixels || g.gradient.kind != GradientKind::Diamond || !self.diamond(s, g, bounds, area)) {
+                        self.field_image(s, g, bounds, area, fill);
+                    }
+                }
                 _ => {}
             }
         }

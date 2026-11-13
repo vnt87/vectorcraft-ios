@@ -187,6 +187,26 @@ fn an_ai_with_an_artboard_past_14400_pt_reopens_at_its_size() {
     assert_eq!(size(&s), (20_000.0, 10_000.0));
 }
 
+/// A page that a PDF 1.3 file can't hold (a side past 32,767 pt that isn't a whole number of
+/// points) fails the export before the thumbnails, the editing data and the flattening: the editing data is never asked for, and the flattener options, which the
+/// flattening would refuse, are never read.
+#[test]
+fn a_page_too_long_for_pdf_1_3_fails_before_the_flattening() {
+    let doc = vectorcraft_doc::Document::new(40_000.5, 300.0);
+    let p = json!({"compatibility": "1.3", "thumbnails": true, "preserveEditing": true, "flattener": {"balance": 500}});
+    let asked = std::cell::Cell::new(false);
+    let native = || {
+        asked.set(true);
+        Ok(vec![])
+    };
+    let e = super::pdf::encode_carrying("document.exportPdf", &doc, &p, native, || Ok(None)).unwrap_err();
+    assert!(
+        e.to_string().contains("PDF 1.3 files hold real numbers up to 32,767, and the page of artboard 1, 40001 pt long, needs larger ones"),
+        "{e}"
+    );
+    assert!(!asked.get(), "the editing data is not made");
+}
+
 #[test]
 fn ait_templates_open_their_document_untitled() {
     let mut s = rich();
@@ -932,25 +952,31 @@ fn gradients_and_patterns_come_back_from_the_editing_copy() {
     }
     let r = s.execute("document.export", &json!({"format": "ai", "aiVersion": 7})).unwrap();
     let legacy = load::load_with("art.ai", &b64(&r), &LoadOptions::default()).unwrap();
-    // Each gradient the art paints with, by its kind and its stops' places and colors to 5% (version
-    // 7 writes a gradient stroke as its filled outline, so the objects differ, and a spot color's
-    // tint through its CMYK equivalent, 2% off here).
+    // Each gradient the art paints with, by its kind and its stops' places, and its stops' colors
+    // within 5% (version 7 writes a gradient stroke as its filled outline, so the objects differ),
+    // except a spot color's tint, which version 7 writes through its CMYK equivalent: 70% of that
+    // equivalent displays about 7% off the tint of the spot color.
     let gradients = |doc: &vectorcraft_doc::Document| {
-        let mut all = std::collections::BTreeSet::new();
+        let mut all = std::collections::BTreeMap::new();
         doc.walk(|node| {
             for it in node.appearance.items.iter() {
                 if let vectorcraft_color::Paint::Gradient(g) = it.paint() {
-                    let stops: Vec<String> = g
-                        .gradient
-                        .stops
-                        .iter()
-                        .map(|s| format!("{:.3} {:?}", s.offset, s.color.to_rgb().map(|v| (v * 20.0).round() * 5.0)))
-                        .collect();
-                    all.insert(format!("{:?} {stops:?}", g.gradient.kind));
+                    let places: Vec<String> = g.gradient.stops.iter().map(|s| format!("{:.3}", s.offset)).collect();
+                    let colors: Vec<([f32; 3], bool)> =
+                        g.gradient.stops.iter().map(|s| (s.color.to_rgb(), s.swatch.is_some() && s.tint < 1.0)).collect();
+                    all.insert(format!("{:?} {places:?}", g.gradient.kind), colors);
                 }
             }
         });
         all
     };
-    assert_eq!(gradients(&legacy.doc), gradients(&before));
+    let (got, want) = (gradients(&legacy.doc), gradients(&before));
+    assert_eq!(got.keys().collect::<Vec<_>>(), want.keys().collect::<Vec<_>>());
+    for (key, stops) in &want {
+        for (i, (rgb, spot)) in stops.iter().enumerate() {
+            let back = got[key][i].0;
+            let most = if *spot { 0.1 } else { 0.05 };
+            assert!((0..3).all(|c| (back[c] - rgb[c]).abs() < most), "{key} stop {i}: {back:?} for {rgb:?}");
+        }
+    }
 }

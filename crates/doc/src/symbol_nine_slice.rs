@@ -451,6 +451,18 @@ impl NineSliceMap {
         self.most_at(art, &boxes, 0)
     }
 
+    /// The affine map that [`Self::place`] and [`Self::place_unclipped`] move object `n` by as one
+    /// piece, with everything in it: the map of the cell its box lies in, or of the cell at the
+    /// origin when it has no box. `None` when its box crosses a guide.
+    pub fn one_cell(&self, n: &Node, doc: &Document) -> Option<Affine> {
+        let boxes = doc.symbol_boxes().quick();
+        let Some(b) = n.geometric(Some(&boxes)).map(|b| self.natural.transform_rect_bbox(b)).filter(|b| finite(*b)) else {
+            return Some(self.cell_at(Point::ZERO));
+        };
+        let (cols, rows) = (self.x.cells(b.x0, b.x1), self.y.cells(b.y0, b.y1));
+        (cols[0] == cols[1] && rows[0] == rows[1]).then(|| self.cell_xf(cols[0], rows[0]))
+    }
+
     /// [`Self::most_placed`] for [`Self::place_unclipped`]: the most objects it makes of `art`.
     pub fn most_placed_unclipped(&self, art: &Node, doc: &Document) -> u64 {
         Self { clips: false, ..*self }.most_placed(art, doc)
@@ -480,7 +492,8 @@ impl NineSliceMap {
     /// [`Self::most_placed`] for a container placed by [`Self::container`].
     fn most_container(&self, n: &Node, boxes: &SymbolBoxes, depth: u32) -> u64 {
         let own = self.most_mask(n, boxes, depth).saturating_add(1);
-        n.children().into_iter().flatten().fold(own, |sum, c| sum.saturating_add(self.most_at(c, boxes, depth + 1)))
+        // As [`Self::container`] places it: a layer's ruler guides left out.
+        n.children().into_iter().flatten().filter(|c| !c.is_ruler_guide()).fold(own, |sum, c| sum.saturating_add(self.most_at(c, boxes, depth + 1)))
     }
 
     /// [`Self::most_placed`] for the opacity mask of `n` as [`Self::place_mask`] places it: a
@@ -548,7 +561,8 @@ impl NineSliceMap {
         let kids = out.children_mut().map(std::mem::take).unwrap_or_default();
         out.transform(center, false);
         if let Some(children) = out.children_mut() {
-            *children = kids.iter().map(|c| Arc::new(self.place_at(c, boxes, depth + 1))).collect();
+            // A ruler guide of a layer is not art: it is not placed.
+            *children = kids.iter().filter(|c| !c.is_ruler_guide()).map(|c| Arc::new(self.place_at(c, boxes, depth + 1))).collect();
         }
         self.place_mask(n, &mut out, boxes, depth);
         out

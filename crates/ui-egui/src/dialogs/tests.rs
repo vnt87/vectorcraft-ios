@@ -32,7 +32,7 @@ fn open(app: &mut VectorcraftApp, kind: &str, fields: serde_json::Value) {
 }
 
 fn objects(app: &VectorcraftApp) -> usize {
-    app.session.doc().unwrap().doc.layers.iter().map(|l| l.children().map_or(0, |c| c.len())).sum()
+    app.session.doc().unwrap().doc.layers.iter().map(|l| l.children().map_or(0, |c| c.iter().filter(|c| !c.is_ruler_guide()).count())).sum()
 }
 
 #[test]
@@ -466,12 +466,13 @@ fn dialogs_do_not_stretch_to_the_screen() {
 #[test]
 fn workspace_and_toolbar_dialogs_end_at_their_buttons() {
     // New Workspace, Manage Workspaces, New Toolbar and Manage Toolbars draw their own windows: each
-    // ends just below its OK button, with no empty band above or below the buttons.
-    for (kind, fields, window) in [
-        ("newWorkspace", json!({"name": "Mine"}), "dialog-workspace"),
-        ("manageWorkspaces", json!({"selected": "", "name": ""}), "dialog-workspace"),
-        (crate::custom_toolbars::KIND, json!({"name": "Toolbar 1"}), "dialog-new-toolbar"),
-        (crate::custom_toolbars::MANAGE, json!({"selected": "", "name": ""}), "dialog-manage-toolbars"),
+    // ends just below its OK button, with no empty band above or below the buttons, and Cancel (where
+    // the dialog has one) sits on OK's row, to its left.
+    for (kind, fields, window, has_cancel) in [
+        ("newWorkspace", json!({"name": "Mine"}), "dialog-workspace", true),
+        ("manageWorkspaces", json!({"selected": "", "name": ""}), "dialog-workspace", false),
+        (crate::custom_toolbars::KIND, json!({"name": "Toolbar 1"}), "dialog-new-toolbar", true),
+        (crate::custom_toolbars::MANAGE, json!({"selected": "", "name": ""}), "dialog-manage-toolbars", false),
     ] {
         let mut app = app();
         open(&mut app, kind, fields);
@@ -479,20 +480,46 @@ fn workspace_and_toolbar_dialogs_end_at_their_buttons() {
         theme::install_fonts(&ctx);
         theme::apply(&ctx, Default::default());
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
-        let mut ok = None;
+        let mut shapes = Vec::new();
         for _ in 0..4 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
             let mut out = ctx.run_ui(input, |ui| show(&mut app, ui.ctx()));
             out.textures_delta.clear();
-            ok = out.shapes.iter().find_map(|c| match &c.shape {
-                egui::Shape::Text(t) if t.galley.text() == "OK" => Some(t.visual_bounding_rect()),
-                _ => None,
-            });
+            shapes = out.shapes;
         }
-        let ok = ok.unwrap_or_else(|| panic!("{kind} draws no OK button"));
         let outer = ctx.memory(|m| m.area_rect(egui::Id::unique(window))).unwrap();
+        let texts = |label: &str| -> Vec<egui::Rect> {
+            shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Text(t) if t.galley.text() == label && outer.intersects(t.visual_bounding_rect()) => Some(t.visual_bounding_rect()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let oks = texts("OK");
+        assert_eq!(oks.len(), 1, "{kind} draws {} OK buttons in its window", oks.len());
+        let ok = oks[0];
         let below = outer.bottom() - ok.bottom();
-        assert!(below < 40.0, "{kind}: {below} pt between OK and the bottom of its {} pt window", outer.height());
+        assert!((0.0..40.0).contains(&below), "{kind}: {below} pt between OK and the bottom of its {} pt window", outer.height());
+        // The nearest thing drawn above the button row: the last field, its label or its list.
+        let above = shapes
+            .iter()
+            .map(|c| c.shape.visual_bounding_rect())
+            .filter(|r| r.is_finite() && outer.intersects(*r) && r.bottom() <= ok.top())
+            .map(|r| r.bottom())
+            .fold(outer.top(), f32::max);
+        let gap = ok.top() - above;
+        assert!(gap < 40.0, "{kind}: {gap} pt between OK and what is drawn above it in its {} pt window", outer.height());
+        let cancels = texts("Cancel");
+        if has_cancel {
+            assert_eq!(cancels.len(), 1, "{kind} draws {} Cancel buttons in its window", cancels.len());
+            let cancel = cancels[0];
+            assert!((cancel.center().y - ok.center().y).abs() < 1.0, "{kind}: Cancel at y {} and OK at y {}", cancel.center().y, ok.center().y);
+            assert!(cancel.right() < ok.left(), "{kind}: Cancel ends at x {} but OK starts at x {}", cancel.right(), ok.left());
+        } else {
+            assert!(cancels.is_empty(), "{kind} draws a Cancel button");
+        }
     }
 }
 
@@ -543,11 +570,11 @@ fn split_into_grid_opens_at_the_selections_size_and_previews() {
     ]);
     frame(&mut app, Default::default());
     // The preview: 2 × 3 cells and the guides along their edges, not yet an undo step.
-    assert_eq!((objects(&app), app.session.doc().unwrap().doc.guides.len()), (6, 10));
+    assert_eq!((objects(&app), app.session.doc().unwrap().doc.ruler_guides().len()), (6, 10));
     assert!(app.session.in_interaction());
     confirm(&mut app).unwrap();
     let st = app.session.doc().unwrap();
-    assert_eq!((objects(&app), st.doc.guides.len(), st.history.undo.len()), (6, 10, undo + 1));
+    assert_eq!((objects(&app), st.doc.ruler_guides().len(), st.history.undo.len()), (6, 10, undo + 1));
     assert!(app.ui.dialog.is_none() && !app.session.in_interaction());
     // Cancel rolls a preview back.
     app.run("select.all", json!({})).unwrap();
@@ -627,9 +654,13 @@ impl PluginIntField {
             author: String::new(),
             api: 1,
             permissions: None,
+            inputs: Vec::new(),
             params: vec![("seed".into(), vectorcraft_plugins::ParamSpec::Int { min, max, default: 0 }.into())],
             extensions: Vec::new(),
             budget: Default::default(),
+            paint_output: false,
+            commands: Vec::new(),
+            command_allowlist: Vec::new(),
         };
         let mut f = PluginIntField { ctx, d: Dialog::new(plugin::KIND, json!({ "seed": start })), m, pos: egui::Pos2::ZERO };
         fn number_rect(shape: &egui::Shape, text: &str) -> Option<egui::Rect> {
@@ -1721,6 +1752,64 @@ fn new_artboard_options_give_the_new_artboard_its_background_color() {
         super::confirm(&mut app).unwrap();
         let ab = app.session.doc().unwrap().doc.artboards.last().cloned().unwrap();
         assert_eq!(ab.color.map(|c| c.to_hex()).as_deref(), want);
+    }
+}
+
+/// Artboard Options shows the artboard's guide label on its Guide Label: row (None, a layer color's
+/// name, or Custom). OK sets a label picked there in one undo step, keeps it while another field
+/// changes, and a null `guideLabel` clears it; Cancel leaves it. OK with nothing changed adds no
+/// undo step, and a new artboard's Artboard Options gives it the label picked.
+#[test]
+fn artboard_options_shows_sets_and_clears_the_guide_label() {
+    let mut app = app();
+    let label = |app: &VectorcraftApp| app.session.doc().unwrap().doc.artboards[0].guide_label.map(vectorcraft_doc::LayerColor::label_text);
+    let undo = |app: &VectorcraftApp| app.session.doc().unwrap().history.undo.len();
+    let lines = |app: &mut VectorcraftApp| {
+        let text = crate::tests_labels::painted_text(app, |app, ui| show(app, ui.ctx()));
+        text.lines().map(str::trim).map(str::to_string).collect::<Vec<_>>()
+    };
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    let shown = lines(&mut app);
+    assert!(shown.iter().any(|l| l == "Guide Label:"), "{shown:?}");
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["guideLabel"], json!(null));
+    let u = undo(&app);
+    super::confirm(&mut app).unwrap();
+    assert_eq!((label(&app), undo(&app)), (None, u), "OK with nothing changed");
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), json!("Orange"));
+    super::confirm(&mut app).unwrap();
+    assert_eq!((label(&app).as_deref(), undo(&app)), (Some("Orange"), u + 1));
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    assert_eq!(app.ui.dialog.as_ref().unwrap().fields["guideLabel"], json!("Orange"));
+    assert!(lines(&mut app).iter().any(|l| l == "Orange"));
+    app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), json!("#123456"));
+    cancel(&mut app);
+    assert_eq!(label(&app).as_deref(), Some("Orange"), "Cancel leaves it");
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    assert!(lines(&mut app).iter().any(|l| l == "Orange"));
+    app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), json!("#123456"));
+    super::confirm(&mut app).unwrap();
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    assert!(lines(&mut app).iter().any(|l| l == "Custom"));
+    app.ui.dialog.as_mut().unwrap().fields.insert("name".into(), json!("Card"));
+    super::confirm(&mut app).unwrap();
+    assert_eq!(label(&app).as_deref(), Some("#123456"), "kept while another field changes");
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), json!("purple"));
+    assert!(super::confirm(&mut app).is_err(), "a name in other letter case is refused");
+    assert_eq!(label(&app).as_deref(), Some("#123456"));
+    crate::dialogs::artboard_options::open(&mut app).unwrap();
+    app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), json!(null));
+    super::confirm(&mut app).unwrap();
+    assert_eq!(label(&app), None);
+    for (picked, want) in [(Some(json!("Teal")), Some("Teal")), (None, None)] {
+        app.run("ui.newArtboard", json!({})).unwrap();
+        if let Some(c) = picked {
+            app.ui.dialog.as_mut().unwrap().fields.insert("guideLabel".into(), c);
+        }
+        super::confirm(&mut app).unwrap();
+        let ab = app.session.doc().unwrap().doc.artboards.last().cloned().unwrap();
+        assert_eq!(ab.guide_label.map(vectorcraft_doc::LayerColor::label_text).as_deref(), want);
     }
 }
 
