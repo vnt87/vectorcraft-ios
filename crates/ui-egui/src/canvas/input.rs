@@ -264,9 +264,10 @@ fn finger_gestures(app: &mut VectorcraftApp, ui: &Ui, rect: egui::Rect) -> (bool
     let deltas = rec.feed_frame_with(ctx.cumulative_frame_nr(), &events, rect, |touch| pen.is_pen_touch(touch));
     // Enable Touch Gestures turns the finger gestures off; a palm is still a palm.
     let gestures = app.session.prefs.touch_gestures;
+    let ui_zoom = app.canvas_ui_zoom;
     if gestures && let Some(vm) = app.view_mut() {
         for d in &deltas {
-            crate::gestures::apply_to_view(vm, rect, d);
+            crate::gestures::apply_to_view(vm, rect, ui_zoom, d);
         }
     }
     if !deltas.is_empty() {

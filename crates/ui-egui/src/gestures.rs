@@ -256,7 +256,7 @@ fn dist_angle(a: Pos2, b: Pos2) -> (f32, f32) {
 /// Apply `d` to `view`: zoom (clamped to the zoom range) and rotate about the gesture pivot, then
 /// pan, so the document point that was under the fingers stays under them. `rect` is the canvas.
 /// Returns false (and leaves the view alone) for unusable input.
-pub fn apply_to_view(view: &mut View, rect: Rect, d: &GestureDelta) -> bool {
+pub fn apply_to_view(view: &mut View, rect: Rect, ui_zoom: f32, d: &GestureDelta) -> bool {
     let ok = d.zoom_factor.is_finite()
         && d.zoom_factor > 0.0
         && d.rotation_delta_rad.is_finite()
@@ -268,13 +268,13 @@ pub fn apply_to_view(view: &mut View, rect: Rect, d: &GestureDelta) -> bool {
     if !ok {
         return false;
     }
-    let anchor = Xf::new(rect, view).to_doc(d.pivot);
+    let anchor = Xf::at(rect, view, ui_zoom).to_doc(d.pivot);
     let zoom = (view.zoom * f64::from(d.zoom_factor)).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
     let rotation = vectorcraft_geom::normalize_deg(view.rotation + f64::from(d.rotation_delta_rad).to_degrees());
     let mut next = *view;
     next.zoom = zoom;
     next.rotation = rotation;
-    let next_xf = Xf::new(rect, &next);
+    let next_xf = Xf::at(rect, &next, ui_zoom);
     let target = d.pivot + d.pan_delta;
     let back = next_xf.delta_to_doc(target - rect.center());
     let center = vectorcraft_geom::Point::new(anchor.x - back.x, anchor.y - back.y);
@@ -414,7 +414,7 @@ mod tests {
         let pivot = pos2(250.0, 180.0);
         let anchor = Xf::new(canvas(), &v).to_doc(pivot);
         let d = GestureDelta { pan_delta: vec2(30.0, -12.0), zoom_factor: 1.8, rotation_delta_rad: 0.4, pivot };
-        assert!(apply_to_view(&mut v, canvas(), &d));
+        assert!(apply_to_view(&mut v, canvas(), 1.0, &d));
         let at = screen_of(&v, anchor);
         assert!((at.x - 280.0).abs() < 1e-2 && (at.y - 168.0).abs() < 1e-2, "{at:?}");
         assert!((v.zoom - 1.8).abs() < 1e-5);
@@ -426,7 +426,7 @@ mod tests {
         let mut v = view();
         let d = GestureDelta { pan_delta: Vec2::ZERO, zoom_factor: 4.0, rotation_delta_rad: 3.0, pivot: pos2(400.0, 300.0) };
         for _ in 0..20 {
-            assert!(apply_to_view(&mut v, canvas(), &d));
+            assert!(apply_to_view(&mut v, canvas(), 1.0, &d));
         }
         assert!(v.zoom <= ZOOM_RANGE.1 && v.rotation > -180.0 && v.rotation <= 180.0);
         let before = v;
@@ -435,7 +435,7 @@ mod tests {
             GestureDelta { pan_delta: vec2(f32::INFINITY, 0.0), ..d },
             GestureDelta { zoom_factor: 0.0, ..d },
         ] {
-            assert!(!apply_to_view(&mut v, canvas(), &bad));
+            assert!(!apply_to_view(&mut v, canvas(), 1.0, &bad));
         }
         assert_eq!((v.zoom, v.rotation, v.center), (before.zoom, before.rotation, before.center));
     }
