@@ -322,10 +322,15 @@ mod tests {
                     assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "{a:?} overlaps {b:?} at {width}");
                 }
             }
+            // Wide windows show the whole group, the search field included; narrow ones drop it
+            // for the search icon first.
             let texts: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
             let has = |s: &str| texts.iter().any(|t| t == s);
-            // Search is an icon only (as in PhotoCraft): its label lives in the tooltip.
-            assert!(!has("Search commands and tools"), "{width}: {texts:?}");
+            if width > 1000.0 {
+                assert!(has("Search commands"), "the search field shows at {width}: {texts:?}");
+            }
+            // The search's tooltip text is not painted in the bar.
+            assert!(!has("Search commands, tools, panels and effects"), "{width}: {texts:?}");
         }
     }
 
