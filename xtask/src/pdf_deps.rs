@@ -5,7 +5,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-const REV: &str = "0cca4ac66f9f4576b3acc5f84d7a2a2ae9fb943e";
+const REV: &str = "4bed21baaa41d2b47bef90879c04df521f6f6043";
 const PACKAGES: &[(&str, &str, &str)] = &[
     ("craft-pdf", "0.1.0", REV),
     ("krilla", "0.8.2", REV),
@@ -32,7 +32,7 @@ pub fn run(root: &Path) -> Result<(), String> {
     }
     let metadata: Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
     validate(&metadata)?;
-    println!("PDF: shared crate and patched backends resolve once to {REV}");
+    println!("PDF: shared crate and patched backends match their pinned sources");
     Ok(())
 }
 

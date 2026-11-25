@@ -1,70 +1,92 @@
-//! Project links (website, app page, GitHub) for About and Home. Icons are Lucide's (ISC). The
-//! fork has no Discord button.
+//! Community and project links: the Discord button (app bar) and the URLs About and Home list.
+//! Icons are Lucide's (ISC); Discord's own logo is a trademark, so the button uses a chat icon
+//! on Discord's colour with the word "Discord".
 
-use egui::Ui;
+use craft::behavior::IconId;
+use craft::ui::buttons::Button;
+use craft::ui::contract::{Props, Show};
+use craft::ui::primitives::IconSpec;
+use craft::ui::style::DataColor;
+use egui::{Color32, Ui};
 
-use crate::theme::Tokens;
-use crate::{VectorcraftApp, icons};
+use crate::VectorcraftApp;
 
-/// One link row: icon, label, opens the command's URL. `centered` drops the icon so the label
-/// alone sits in the middle of the column.
-fn link(app: &mut VectorcraftApp, ui: &mut Ui, icon: &str, label: &str, cmd: &str, url: &str, centered: bool) {
-    let t = Tokens::get(ui.ctx());
-    let button = |ui: &mut Ui| ui.add(egui::Button::new(egui::RichText::new(label).color(t.accent).size(13.0)).frame(false)).on_hover_text(url);
-    let r = if centered {
-        button(ui)
-    } else {
-        ui.horizontal(|ui| {
-            icons::icon(ui, icon, 16.0, t.icon);
-            button(ui)
-        })
-        .inner
-    };
-    if r.clicked() {
-        app.open_link(cmd);
+/// Discord's brand colour (a colour, not a logo).
+const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
+
+/// The Discord button: the app's filled push button with no edge, as production's app bar drew it, with Discord's colour
+/// on its icon alone. It opens the community link.
+pub fn discord_button(app: &mut VectorcraftApp, ui: &mut Ui) {
+    let icon = IconSpec::svg(IconId::new("message-circle")).data_color(DataColor::new(DISCORD));
+    let shown = Button::new(tl!("Discord")).icon(icon).tooltip(tl!("Join the ArtCraft community on Discord (discord.gg/artcraft)")).show(ui);
+    if shown.clicks > 0 {
+        app.open_link("help.discord");
     }
 }
 
-/// The website, app page and GitHub links.
-pub fn links(app: &mut VectorcraftApp, ui: &mut Ui) {
-    links_in(app, ui, false);
-}
-
-/// [`links`] for a centred column (the Home screen's, as PhotoCraft's, #4684), each link in the middle.
-pub fn links_centered(app: &mut VectorcraftApp, ui: &mut Ui) {
-    links_in(app, ui, true);
-}
-
-fn links_in(app: &mut VectorcraftApp, ui: &mut Ui, centered: bool) {
+/// The website, app page and GitHub links as (English label, URL), in that order: the one source
+/// About and Home list them from.
+pub fn link_urls(app: &mut VectorcraftApp) -> [(&'static str, String); 3] {
     let l = app.session.execute("help.links", &serde_json::json!({})).unwrap_or_default();
-    let s = |k: &str| l[k].as_str().unwrap_or("").to_string();
-    link(app, ui, "globe", tl!("ArtCraft website"), "help.website", &s("website"), centered);
-    link(app, ui, "external-link", tl!("VectorCraft on getartcraft.com"), "help.appPage", &s("appPage"), centered);
-    link(app, ui, "git-branch", tl!("Source code on GitHub"), "help.github", &s("github"), centered);
+    let url = |k: &str| l[k].as_str().unwrap_or("").to_string();
+    [
+        (tl!("ArtCraft website"), url("website")),
+        (tl!("VectorCraft on getartcraft.com"), url("appPage")),
+        (tl!("Source code on GitHub"), url("github")),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The URLs the frame after `app`'s last action asked to open.
+    fn opened_in_frame(app: &mut VectorcraftApp, ctx: &egui::Context) -> Vec<String> {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.tick(ui.ctx()));
+        out.textures_delta.clear();
+        out.platform_output
+            .commands
+            .into_iter()
+            .filter_map(|c| match c {
+                egui::OutputCommand::OpenUrl(open) => Some(open.url),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn link_clicks_open_the_right_urls() {
-        use std::sync::{Arc, Mutex};
-        let opened = Arc::new(Mutex::new(vec![]));
-        let o = opened.clone();
-        let services = crate::Services { open_url: Some(Box::new(move |u: &str| o.lock().unwrap().push(u.to_string()))), ..Default::default() };
-        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), services);
-        for id in ["help.website", "help.appPage", "help.github"] {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+        let ctx = crate::testing::ui_context();
+        let mut opened = vec![];
+        for id in ["help.discord", "help.website", "help.appPage", "help.github"] {
             crate::menus::invoke(&mut app, id, serde_json::json!({}));
+            opened.extend(opened_in_frame(&mut app, &ctx));
         }
         assert_eq!(
-            *opened.lock().unwrap(),
-            ["https://getartcraft.com", "https://getartcraft.com/apps/vectorcraft", "https://github.com/storytold/vectorcraft"]
+            opened,
+            [
+                "https://discord.gg/artcraft",
+                "https://getartcraft.com",
+                "https://getartcraft.com/apps/vectorcraft",
+                "https://github.com/storytold/vectorcraft"
+            ]
         );
-        assert_eq!(opened.lock().unwrap().len(), 3);
-        let ctx = egui::Context::default();
-        crate::theme::install_fonts(&ctx);
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| links(&mut app, ui));
-        out.textures_delta.clear();
+        // The control channel / MCP path returns the URL without opening a browser.
+        let v = app.run("help.discord", serde_json::json!({})).unwrap();
+        assert_eq!(v["url"], "https://discord.gg/artcraft");
+        assert!(opened_in_frame(&mut app, &ctx).is_empty(), "nothing more is opened");
+    }
+
+    #[test]
+    fn link_urls_reads_the_three_help_links() {
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), Default::default());
+        let links = link_urls(&mut app);
+        assert_eq!(links.each_ref().map(|(label, _)| *label), ["ArtCraft website", "VectorCraft on getartcraft.com", "Source code on GitHub"]);
+        for (label, url) in &links {
+            assert!(url.starts_with("https://"), "{label}: {url}");
+        }
+        assert_eq!(links, link_urls(&mut app), "the order is stable");
     }
 }

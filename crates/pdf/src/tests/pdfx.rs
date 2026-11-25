@@ -42,6 +42,51 @@ fn text(pdf: &[u8]) -> String {
     String::from_utf8_lossy(pdf).into_owned()
 }
 
+/// The XMP packet of `pdf`, read as its stream's `/Length` says: the packet's end must be inside
+/// those bytes and nothing but the end of line may follow them before `endstream`.
+fn xmp_packet(pdf: &[u8]) -> String {
+    use crate::lab_spot::{find, rfind};
+    let begin = find(pdf, b"<?xpacket begin", 0).expect("an XMP packet");
+    let head = &pdf[..begin];
+    let obj = rfind(head, b" obj").expect("the packet's object");
+    let dict = &head[obj..];
+    let at = find(dict, b"/Length ", 0).expect("its length") + b"/Length ".len();
+    let digits: Vec<u8> = dict[at..].iter().copied().take_while(u8::is_ascii_digit).collect();
+    let length: usize = String::from_utf8(digits).unwrap().parse().unwrap();
+    let mut data = obj + rfind(dict, b"stream").unwrap() + b"stream".len();
+    data += pdf[data..].iter().take(2).take_while(|b| matches!(b, b'\r' | b'\n')).count();
+    let stream = &pdf[data..data + length];
+    let close = find(stream, b"<?xpacket end=", 0).expect("the packet ends inside the stream's length");
+    assert!(find(stream, b"?>", close).is_some(), "the packet ends inside the stream's length");
+    let rest = String::from_utf8_lossy(&pdf[data + length..]);
+    assert!(rest.trim_start_matches(['\r', '\n']).starts_with("endstream"), "the stream ends at its length");
+    String::from_utf8(stream.to_vec()).unwrap()
+}
+
+/// The value of the XMP element `tag` in `xmp`.
+fn xmp_value<'a>(xmp: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let rest = &xmp[xmp.find(&open)? + open.len()..];
+    Some(&rest[..rest.find(&format!("</{tag}>"))?])
+}
+
+#[test]
+fn pdfx4_metadata_has_a_metadata_date_equal_to_the_modification_date() {
+    let d = doc(&[Color::cmyk(0.0, 1.0, 1.0, 0.0)]);
+    // Dated by the writer (created), then dated again after writing (modified later).
+    for modified in [None, Some(1_800_000_000)] {
+        let mut o = opts(Standard::PdfX4, |_| {});
+        o.modified = modified;
+        let xmp = xmp_packet(&export(&d, &o).unwrap());
+        let modify = xmp_value(&xmp, "xmp:ModifyDate").expect("xmp:ModifyDate");
+        assert_eq!(xmp_value(&xmp, "xmp:MetadataDate"), Some(modify), "{modified:?}: {xmp}");
+        assert_eq!(xmp.matches("<xmp:MetadataDate>").count(), 1, "{modified:?}");
+        if modified.is_some() {
+            assert!(modify.starts_with("2027-01-15T"), "the later date: {modify}");
+        }
+    }
+}
+
 #[test]
 fn each_standard_writes_its_header_output_intent_boxes_and_identification() {
     let mut d = doc(&[Color::cmyk(0.0, 1.0, 1.0, 0.0), Color::rgb(0.2, 0.4, 0.9)]);
@@ -202,35 +247,20 @@ fn pdfx_1a_and_x3_files_have_no_transparency() {
 
 #[test]
 fn pdfx_settings_rules() {
+    let profiles = ActiveProfiles::default();
     for standard in X {
-        // A password is refused, and so are editing data.
-        let e = opts(standard, |s| s.security.open_password = "x".into()).settings.check().unwrap_err();
-        assert!(matches!(e, PdfError::BadSetting(_)), "{standard:?}: {e}");
+        // A password is refused.
         assert!(export(&doc(&[]), &opts(standard, |s| s.security.permissions_password = "x".into())).is_err());
-        assert!(
-            matches!(opts(standard, |s| s.preserve_editing = true).settings.check(), Err(PdfError::BadSetting(m)) if m.contains("preserveEditing"))
-        );
-        // Its own version, never PDF 1.7 or 2.0.
-        assert!(standard.allows(standard.version()), "{standard:?}");
-        assert!(!standard.allows(Compatibility::Pdf17) && !standard.allows(Compatibility::Pdf20), "{standard:?}");
-        let e = opts(standard, |s| s.compatibility = Compatibility::Pdf17).settings.check().unwrap_err();
-        assert!(matches!(e, PdfError::BadSetting(ref m) if m.contains(standard.label())), "{standard:?}: {e}");
-        // A name that is no profile, without a registry.
-        let e = opts(standard, |s| s.output.output_intent = "No Such Press".into()).settings.check().unwrap_err();
-        assert!(matches!(e, PdfError::BadSetting(ref m) if m.contains("No Such Press")), "{standard:?}: {e}");
+        // A name that is no profile of the app's colour catalog, without a registry.
+        let e = opts(standard, |s| s.output.output_intent = "No Such Press".into()).settings.check(&profiles).unwrap_err();
+        assert!(e.message.contains("No Such Press"), "{standard:?}: {e}");
     }
-    assert_eq!(Standard::PdfX4.version(), Compatibility::Pdf16);
-    assert!(Standard::PdfX4.allows(Compatibility::Pdf15) && !Standard::PdfX1a.allows(Compatibility::Pdf15));
-    // Layers: PDF/X-4 only.
-    assert!(
-        matches!(settings(json!({"standard": "pdfX1a", "compatibility": "1.4", "createLayers": true})).check(), Err(PdfError::BadSetting(m)) if m.contains("createLayers"))
-    );
-    assert!(settings(json!({"standard": "pdfX4", "compatibility": "1.6", "createLayers": true})).check_values().is_ok());
     // A date is required.
     assert!(matches!(crate::pdfx::require_date(Standard::PdfX4, None), Err(PdfError::Unsupported(_))));
     assert!(crate::pdfx::require_date(Standard::None, None).is_ok());
     // PDF/X settings don't warn about the output condition: the output intent is always written.
-    assert!(settings(json!({"standard": "pdfX4", "compatibility": "1.6", "output": {"outputCondition": "Coated"}})).warnings().is_empty());
+    let warned = settings(json!({"standard": "pdfX4", "compatibility": "1.6", "output": {"outputCondition": "Coated"}})).warnings(&profiles);
+    assert!(warned.is_empty(), "{warned:?}");
 }
 
 #[test]

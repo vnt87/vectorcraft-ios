@@ -57,15 +57,18 @@ pub use envelope::{
     envelope_content_boxes, envelope_content_boxes_with, envelope_expand, envelope_frame, envelope_grid, envelope_mapper, envelope_of,
     envelope_overlay, envelope_stroke_margin, set_type_ink, smooth_handles, warp_grid,
 };
-pub(crate) use expand::max_outset;
 pub use expand::{
     Hooks, MAX_GENERATED, Outliner, PatternTiles, affine_near, expand_deep, expand_deep_hooks, expand_live, expand_live_hooks, expand_live_with,
-    expanded_group, expanded_group_hooks, is_live, mesh_quad_nodes, mesh_warp_cost, mesh_warp_image, subtree_has_live,
+    expanded_group, expanded_group_hooks, is_drawn_live, is_live, mesh_quad_nodes, mesh_warp_cost, mesh_warp_image, subtree_has_live,
 };
+pub(crate) use expand::{max_outset, mesh_warp_image_with};
 #[cfg(test)]
 use mesh::grid_eval;
 pub use mesh::{Coons, GradientMesh, MeshAppearance, MeshPiece, MeshPoint, MeshQuad, default_fidelity, grid_points, nodes_bounds};
-pub use warp::{WARP_NET, WarpNet, WarpStyle, fit_piece, map_nonlinear, map_nonlinear_within, pieces, uses_net, warp_point, warp_version};
+pub use warp::{
+    WARP_NET, WarpNet, WarpStyle, fit_piece, map_handles_within, map_nonlinear, map_nonlinear_within, map_smooth_within, pieces, uses_net,
+    warp_point, warp_version,
+};
 
 #[cfg(test)]
 mod tests {
@@ -85,6 +88,30 @@ mod tests {
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert_eq!(blend_ramp(F64Deserializer::<Error>::new(bad)).unwrap(), 0.0);
             assert_eq!(blend_color_shift(F64Deserializer::<Error>::new(bad)).unwrap(), 0.0);
+        }
+    }
+
+    /// The smooth map takes each handle along the map's derivative, also far from the origin,
+    /// where a fixed sampling step would round away (#7069): the identity map keeps a curve's
+    /// handles there.
+    #[test]
+    fn map_smooth_within_keeps_handles_far_from_the_origin() {
+        for at in [0.0, 1e13] {
+            let o = Point::new(at, at);
+            let curve = PathData::single(vectorcraft_geom::SubPath::new(
+                vec![
+                    vectorcraft_geom::Anchor::with_handles(o, o, o + vectorcraft_geom::Vec2::new(0.2, 0.0)),
+                    vectorcraft_geom::Anchor::with_handles(
+                        o + vectorcraft_geom::Vec2::new(1.0, 0.5),
+                        o + vectorcraft_geom::Vec2::new(0.8, 0.5),
+                        o + vectorcraft_geom::Vec2::new(1.0, 0.5),
+                    ),
+                ],
+                false,
+            ));
+            let out = map_smooth_within(&curve, 10.0, usize::MAX, |p| p);
+            let (a, b) = (&curve.subpaths[0].anchors, &out.subpaths[0].anchors);
+            assert!(a[0].h_out.distance(b[0].h_out) < 0.01 && a[1].h_in.distance(b[1].h_in) < 0.01, "at {at}: {:?} {:?}", b[0].h_out, b[1].h_in);
         }
     }
 
@@ -1311,6 +1338,33 @@ mod tests {
         let piece = Arc::make_mut(&mut children[0]);
         piece.extras_mut().warp_piece = false;
         assert!(piece.knockout_outline().is_none());
+    }
+
+    /// Each piece of a mesh-warped colorized image keeps its color and whether it overprints.
+    #[test]
+    fn mesh_warp_image_pieces_keep_an_overprinting_color() {
+        let im = crate::ImageObject {
+            key: "pic".into(),
+            width: 4,
+            height: 4,
+            xf: Affine::scale(10.0),
+            link: None,
+            placement: Default::default(),
+            pixels: None,
+        };
+        let mut n = Node::new(NodeId(3), NodeKind::Image(Box::new(im.clone())));
+        n.extras_mut().colorize = Some(Box::new(Paint::solid(Color::BLACK)));
+        n.extras_mut().colorize_overprint = true;
+        for masked in [false, true] {
+            let g = mesh_warp_image(&n, &im, &|p| p, 2, false, masked);
+            let mut pieces = vec![];
+            g.walk(&mut |c| {
+                if matches!(c.kind, NodeKind::Image(_)) {
+                    pieces.push(c.colorize_overprints());
+                }
+            });
+            assert_eq!(pieces, [true; 8], "masked {masked}");
+        }
     }
 
     /// More cells than the objects live art may make cut no pieces (the count overflowed).

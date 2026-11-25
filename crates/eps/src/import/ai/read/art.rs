@@ -277,6 +277,18 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
+    /// A gradient mesh's `X#` entry `vals`. In a symbol's art, corners are in the space an image's
+    /// matrix is in there; a mesh there in a file that doesn't say where the canvas is is unread.
+    pub(super) fn mesh_entry(&mut self, vals: &[V]) {
+        let to_doc = self.image_space();
+        if let Some((m, _)) = self.mesh.as_mut() {
+            match to_doc {
+                Some(to_doc) => m.entry(vals, to_doc),
+                None => m.unread = true,
+            }
+        }
+    }
+
     /// `/End X!`: the gradient mesh read, as one object.
     pub(super) fn end_mesh(&mut self) -> Result<(), String> {
         let Some((m, hidden)) = self.mesh.take() else { return Ok(()) };
@@ -351,11 +363,15 @@ impl<'a> Reader<'a> {
     pub(super) fn set_instance(&mut self, i: &Instance) {
         let mut to_doc = self.space();
         // In a pattern's definition a gradient's `Xm` and `Bm` are written y down about the canvas point of art space's
-        // origin, as the file's PDF part draws them; in a symbol's, as the instances in its art are.
+        // origin, as the file's PDF part draws them; in a symbol's, as the instances in its art are, an envelope's
+        // contents' included (which `space` moves alone).
         if (self.pattern.is_some() || self.symbol.is_some())
             && i.has_matrix()
             && let Some(t) = self.template
         {
+            if self.pattern.is_none() && !self.envelope_blocks.is_empty() {
+                to_doc = Affine::IDENTITY;
+            }
             let (cx, cy) = ((t[0] + t[2]) / 2.0, (t[1] + t[3]) / 2.0);
             to_doc *= Affine::new([1.0, 0.0, 0.0, -1.0, CANVAS_CENTRE - cx, CANVAS_CENTRE + cy]);
         }
@@ -646,7 +662,7 @@ impl<'a> Reader<'a> {
         };
         // The placeholder is all the document has of the file: what a missing link shows.
         let bytes = Arc::new(png);
-        let blob = ImageBlob { mime: "image/png".into(), bytes: bytes.clone(), proxy: Some(bytes) };
+        let blob = ImageBlob { mime: "image/png".into(), bytes: bytes.clone(), proxy: Some(bytes), file_font: Default::default() };
         let key = linked_key(&blob, &path);
         self.doc.images.entry(key.clone()).or_insert(blob);
         self.warn(LINKED_PLACEHOLDERS);
@@ -805,7 +821,8 @@ impl<'a> Reader<'a> {
     }
 
     /// Add an image object with the state's transparency, `mask` as its opacity mask and
-    /// `colorize` as the color that colorizes it.
+    /// `colorize` as the color that colorizes it, which overprints while the fill overprint (`O`)
+    /// in force is on.
     fn add_image_colorized(&mut self, im: ImageObject, mask: Option<OpacityMask>, colorize: Option<Paint>, hidden: bool) -> Result<(), String> {
         let gs = self.gs.clone();
         let mut node = self.new_node(NodeKind::Image(Box::new(im)), &gs);
@@ -813,6 +830,7 @@ impl<'a> Reader<'a> {
         node.blend = gs.blend;
         node.knockout_shape = gs.knockout_shape;
         node.extras_mut().mask = mask.map(Box::new);
+        node.extras_mut().colorize_overprint = colorize.is_some() && gs.overprint_fill;
         node.extras_mut().colorize = colorize.map(Box::new);
         self.add(node, hidden)?;
         self.image_tail = self.after_object;
@@ -889,7 +907,7 @@ impl<'a> Reader<'a> {
         }
         // The preview is all the document has of the file: what a missing link shows.
         let bytes = Arc::new(png);
-        let blob = ImageBlob { mime: "image/png".into(), bytes: bytes.clone(), proxy: Some(bytes) };
+        let blob = ImageBlob { mime: "image/png".into(), bytes: bytes.clone(), proxy: Some(bytes), file_font: Default::default() };
         let key = linked_key(&blob, &path);
         let fresh = !self.doc.images.contains_key(&key);
         self.doc.images.entry(key.clone()).or_insert(blob);
