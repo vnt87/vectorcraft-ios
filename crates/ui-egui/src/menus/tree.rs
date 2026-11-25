@@ -804,7 +804,6 @@ fn built_in_tree(english_names: bool, listed: &Listed) -> Vec<(&'static str, Vec
             vec![
                 c("Search Commands…", "help.commandPalette"),
                 Sep,
-                c("Join Our Discord", "help.discord"),
                 c("ArtCraft Website", "help.website"),
                 c("VectorCraft on getartcraft.com", "help.appPage"),
                 c("VectorCraft on GitHub", "help.github"),
@@ -905,7 +904,6 @@ fn app_menu() -> Vec<Node> {
     let mac = Platforms::MAC;
     vec![
         c("About VectorCraft", "help.about").role(ItemRole::About).platforms(mac),
-        c("Join Our Discord", "help.discord").platforms(mac),
         sub("Settings", settings).role(ItemRole::Settings).platforms(mac),
         sub("Language", language).role(ItemRole::Language).platforms(mac),
         sub("Appearance", appearance).role(ItemRole::Appearance).platforms(mac),

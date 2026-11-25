@@ -61,7 +61,7 @@ enum Trailing {
 
 impl Trailing {
     /// The controls in the order they are drawn.
-    const SHOWN: [Trailing; 4] = [Trailing::Discord, Trailing::Search, Trailing::Safe, Trailing::Switcher];
+    const SHOWN: [Trailing; 3] = [Trailing::Search, Trailing::Safe, Trailing::Switcher];
 
     /// The rank the bar gives it up in, lowest first: Discord, then the search. Each is also in a menu, so a hidden one
     /// goes nowhere. Safe Mode and the switcher always show.

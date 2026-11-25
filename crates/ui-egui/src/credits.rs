@@ -60,8 +60,9 @@ pub fn credits() -> Credits {
 }
 
 /// The URL of the community Discord, or empty when the command gives none.
-pub(crate) fn discord_url(app: &mut VectorcraftApp) -> String {
-    let reply = app.session.execute("help.discord", &serde_json::json!({})).unwrap_or_default();
+pub(crate) fn discord_url(_app: &mut VectorcraftApp) -> String {
+    String::new()
+})).unwrap_or_default();
     reply["url"].as_str().unwrap_or_default().to_string()
 }
 
